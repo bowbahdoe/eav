@@ -195,9 +195,7 @@ enum ParserState {
     ParsingString {
         built_up: String,
     },
-    SelectingDispatch {
-        characters_so_far: Vec<char>,
-    },
+    SelectingDispatch,
 }
 
 /// Commas are considered whitespace for EDN
@@ -319,6 +317,9 @@ fn equal(v1: &Value, v2: &Value) -> bool {
 /// Likely *very* suboptimal parsing. Focus for now should be getting actually correct
 /// results, since there is no good edn library for rust.
 fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSuccess, ParserError> {
+    println!("{:?}", parser_state);
+    println!("{:?}", s);
+    println!();
     match parser_state {
         ParserState::Begin => {
             if s.len() == 0 {
@@ -376,9 +377,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
             } else if s[0] == '#' {
                 parse_helper(
                     &s[1..],
-                    ParserState::SelectingDispatch {
-                        characters_so_far: vec![],
-                    },
+                    ParserState::SelectingDispatch,
                 )
             } else if s[0].is_alphabetic() {
                 parse_helper(
@@ -386,7 +385,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                     ParserState::ParsingSymbol {
                         characters_before_a_slash: vec![],
                         characters_after_a_slash: vec![],
-                        saw_slash: true,
+                        saw_slash: false,
                     },
                 )
             } else if s[0].is_numeric() {
@@ -600,7 +599,11 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                         }
                     }
                     else {
-                        Err(ParserError::UnexpectedCharacter(s[0]))
+                        let name: String = characters_before_a_slash.into_iter().collect();
+                        Ok(ParserSuccess {
+                            remaining_input: s,
+                            value: Value::Symbol(Symbol::from_name(&name))
+                        })
                     }
                 }
                 else {
@@ -617,7 +620,11 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                         Err(ParserError::CannotHaveMoreThanOneSlashInSymbol)
                     }
                     else {
-                        Err(ParserError::UnexpectedCharacter(s[0]))
+                        let name: String = characters_before_a_slash.into_iter().collect();
+                        Ok(ParserSuccess {
+                            remaining_input: s,
+                            value: Value::Symbol(Symbol::from_name(&name))
+                        })
                     }
                 }
 
@@ -687,16 +694,16 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
 
         ParserState::ParsingNumeric { .. } => {}
         ParserState::ParsingString { .. } => {} */
-        ParserState::SelectingDispatch { characters_so_far } => {
+        ParserState::SelectingDispatch => {
             if s.len() == 0 {
                 Err(ParserError::UnexpectedEndOfInput)
-            } else if s[0] == '_' && characters_so_far.len() == 0 {
+            } else if s[0] == '_' {
                 // Drop the next form. Still error if that form is malformed
                 let ParserSuccess {
                     remaining_input, ..
                 } = parse_helper(&s[1..], ParserState::Begin)?;
                 parse_helper(remaining_input, ParserState::Begin)
-            } else if s[0] == '{' && characters_so_far.len() == 0 {
+            } else if s[0] == '{' {
                 parse_helper(
                     &s[1..],
                     ParserState::ParsingSet {
@@ -709,7 +716,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                 let ParserSuccess {
                     remaining_input,
                     value,
-                } = parse_helper(&s[1..], ParserState::Begin)?;
+                } = parse_helper(&s, ParserState::Begin)?;
                 match value {
                     Value::Symbol(symbol) => {
                         let next_success = parse_helper(remaining_input, ParserState::Begin)?;
