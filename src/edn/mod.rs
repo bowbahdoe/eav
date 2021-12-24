@@ -7,7 +7,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use thiserror::Error;
 use uuid::Uuid;
-use test::RunIgnored::No;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Keyword {
@@ -764,7 +763,7 @@ fn replace_nil_false_true(value: Value) -> Value {
     match value {
         Value::Nil => Value::Nil,
         Value::String(s) => Value::String(s),
-        Value::Character(c) => Value::Character(c)
+        Value::Character(c) => Value::Character(c),
         Value::Symbol(symbol) => {
             if symbol.namespace == None {
                 if symbol.name == "true" {
@@ -813,7 +812,7 @@ fn replace_nil_false_true(value: Value) -> Value {
         Value::Boolean(b) => Value::Boolean(b),
         Value::Inst(inst) => Value::Inst(inst),
         Value::Uuid(uuid) => Value::Uuid(uuid),
-        Value::TaggedElement(tag, val) => Value::TaggedElement(tag, replace_nil_false_true(val))
+        Value::TaggedElement(tag, val) => Value::TaggedElement(tag, Box::new(replace_nil_false_true(*val)))
     }
 }
 // Parse EDN from the given input string
@@ -832,8 +831,8 @@ fn parse(s: &str) -> Result<Value, ParserError> {
             });
         }
     }
-    /// TODO: Crawl tree and convert `true`, `false`, and `nil` symbols to the proper values
-    Ok(value)
+    // previous step interprets nil, false, and true as symbols
+    Ok(replace_nil_false_true(value))
 }
 
 #[cfg(test)]
@@ -1223,6 +1222,18 @@ mod tests {
              friends [\"sally\" \"john\" \"linda\"]\
              \"other\" {:stuff :here}}").unwrap()
             )
+        )
+    }
+
+    #[test]
+    fn test_nil_false_true() {
+        assert_eq!(
+            Value::List(
+                vec![Value::Nil,
+                Value::Boolean(false),
+                Value::Boolean(true)]
+            ),
+            parse("(nil false true)").unwrap()
         )
     }
 }
