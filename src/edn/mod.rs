@@ -128,6 +128,9 @@ enum ParserError {
     #[error("Only symbols can be used as tags")]
     InvalidElementForTag { value: Value },
 
+    #[error("Invalid character specification")]
+    InvalidCharacterSpecification,
+
     #[error("Unexpected character")]
     UnexpectedCharacter(char),
 
@@ -375,6 +378,11 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                 } else {
                     Err(ParserError::InvalidKeyword)
                 }
+            } else if s[0] == '\\' {
+                parse_helper(
+                    &s[1..],
+                    ParserState::ParsingCharacter,
+                )
             } else if s[0] == '#' {
                 parse_helper(&s[1..], ParserState::SelectingDispatch)
             } else if is_allowed_anywhere_symbol_character(s[0]) || s[0] == '/' {
@@ -546,9 +554,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                     let name: String = characters_after_a_slash.into_iter().collect();
                     Ok(ParserSuccess {
                         remaining_input: s,
-                        value: Value::Symbol(Symbol::from_namespace_and_name(
-                            &namespace, &name,
-                        )),
+                        value: Value::Symbol(Symbol::from_namespace_and_name(&namespace, &name)),
                     })
                 }
             } else {
@@ -684,8 +690,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
         }
         /*
 
-        ParserState::ParsingNumeric { .. } => {}
-        ParserState::ParsingString { .. } => {} */
+        ParserState::ParsingNumeric { .. } => {}*/
         ParserState::SelectingDispatch => {
             if s.len() == 0 {
                 Err(ParserError::UnexpectedEndOfInput)
@@ -755,73 +760,103 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
             }
         }
 
-        _ => Err(ParserError::UnexpectedEndOfInput),
+        ParserState::ParsingCharacter => {
+            let ParserSuccess {
+                remaining_input,
+                value
+            } = parse_helper(s, ParserState::Begin)?;
+
+            if let Value::Symbol(symbol) = value {
+                if symbol.namespace == None {
+                    if symbol.name.len() == 1 {
+                        Ok(ParserSuccess {
+                            remaining_input,
+                            value: Value::Character(symbol.name.chars().next().expect(
+                                "Asserted that this string has at least one character."
+                            ))
+                        })
+                    }
+                    else {
+                        match &symbol.name.as_str() {
+                            &"newline" => Ok(ParserSuccess {
+                                remaining_input,
+                                value: Value::Character('\n')
+                            }),
+                            &"return" => Ok(ParserSuccess {
+                                remaining_input,
+                                value: Value::Character('\r')
+                            }),
+                            &"space" => Ok(ParserSuccess {
+                                remaining_input,
+                                value: Value::Character(' ')
+                            }),
+                            &"tab" => Ok(ParserSuccess {
+                                remaining_input,
+                                value: Value::Character('\t')
+                            }),
+                            _ => Err(ParserError::InvalidCharacterSpecification)
+                        }
+                    }
+                }
+                else {
+                    Err(ParserError::InvalidCharacterSpecification)
+                }
+            } else {
+                Err(ParserError::InvalidCharacterSpecification)
+            }
+        }
+
+        _ => Err(ParserError::InvalidCharacterSpecification)
     }
 }
 
-fn replace_nil_false_true(value: Value) -> Value {
+/// Crawls the tree mutably to avoid pointless allocations
+fn replace_nil_false_true(value: &mut Value) {
     match value {
-        Value::Nil => Value::Nil,
-        Value::String(s) => Value::String(s),
-        Value::Character(c) => Value::Character(c),
         Value::Symbol(symbol) => {
             if symbol.namespace == None {
                 if symbol.name == "true" {
-                    Value::Boolean(true)
+                    *value = Value::Boolean(true)
+                } else if symbol.name == "false" {
+                    *value = Value::Boolean(false)
+                } else if symbol.name == "nil" {
+                    *value = Value::Nil
                 }
-                else if symbol.name == "false" {
-                    Value::Boolean(false)
-                }
-                else if symbol.name == "nil" {
-                    Value::Nil
-                }
-                else {
-                    Value::Symbol(symbol)
-                }
-            }
-            else {
-                Value::Symbol(symbol)
             }
         }
-        Value::Keyword(k) => Value::Keyword(k),
-        Value::Integer(i) => Value::Integer(i),
-        Value::Float(f) => Value::Float(f),
-        Value::List(elements) => Value::List(
-            elements
-                .into_iter()
-                .map(|element| replace_nil_false_true(element))
-                .collect()
-        ),
-        Value::Vector(elements) => Value::Vector(
-            elements
-                .into_iter()
-                .map(|element| replace_nil_false_true(element))
-                .collect()
-        ),
-        Value::Map(entries) => Value::Map(
-            entries.into_iter()
-                .map(|(k, v)| (replace_nil_false_true(k), replace_nil_false_true(v)))
-                .collect()
-        ),
-        Value::Set(elements) => Value::Set(
-            elements
-                .into_iter()
-                .map(|element| replace_nil_false_true(element))
-                .collect()
-        ),
-        Value::Boolean(b) => Value::Boolean(b),
-        Value::Inst(inst) => Value::Inst(inst),
-        Value::Uuid(uuid) => Value::Uuid(uuid),
-        Value::TaggedElement(tag, val) => Value::TaggedElement(tag, Box::new(replace_nil_false_true(*val)))
+        Value::List(elements) => {
+            for element in elements.iter_mut() {
+                replace_nil_false_true(element);
+            }
+        }
+        Value::Vector(elements) => {
+            for element in elements.iter_mut() {
+                replace_nil_false_true(element);
+            }
+        }
+        Value::Map(entries) => {
+            for (k, v) in entries.iter_mut() {
+                replace_nil_false_true(k);
+                replace_nil_false_true(v);
+            }
+        }
+        Value::Set(elements) => {
+            for element in elements.iter_mut() {
+                replace_nil_false_true(element);
+            }
+        }
+        Value::TaggedElement(_, val) => replace_nil_false_true(val),
+        _ => {}
     }
 }
+
 // Parse EDN from the given input string
 fn parse(s: &str) -> Result<Value, ParserError> {
     let chars: Vec<char> = s.chars().collect();
     // TODO: pre-strip comments
     let ParserSuccess {
         remaining_input,
-        value,
+        mut value,
     } = parse_helper(&chars, ParserState::Begin)?;
     for c in remaining_input {
         if !is_whitespace(*c) {
@@ -832,7 +867,8 @@ fn parse(s: &str) -> Result<Value, ParserError> {
         }
     }
     // previous step interprets nil, false, and true as symbols
-    Ok(replace_nil_false_true(value))
+    replace_nil_false_true(&mut value);
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -917,9 +953,9 @@ mod tests {
         assert_eq!(
             Value::Map(vec![
                 (Value::List(vec![]), Value::Vector(vec![])),
-                (Value::Vector(vec![]), Value::List(vec![]))
+                (Value::Keyword(Keyword::from_name("a")), Value::List(vec![]))
             ]),
-            parse("{()[] [] ()}").unwrap()
+            parse("{()[] :a ()}").unwrap()
         )
     }
 
@@ -1130,110 +1166,120 @@ mod tests {
     fn test_example_map() {
         assert_eq!(
             Value::Map(vec![
-                (Value::Keyword(Keyword::from_namespace_and_name("person", "name")), Value::String("Joe".to_string())),
-                (Value::Keyword(Keyword::from_namespace_and_name("person", "parent")), Value::String("Bob".to_string())),
-                (Value::Keyword(Keyword::from_name("ssn")), Value::String("123".to_string())),
-                (Value::Symbol(Symbol::from_name("friends")), Value::Vector(vec![
-                    Value::String("sally".to_string()),
-                    Value::String("john".to_string()),
-                    Value::String("linda".to_string())
-                ])),
-                (Value::String("other".to_string()), Value::Map(vec![
-                    (Value::Keyword(Keyword::from_name("stuff")), Value::Keyword(Keyword::from_name("here")))
-                ]))
+                (
+                    Value::Keyword(Keyword::from_namespace_and_name("person", "name")),
+                    Value::String("Joe".to_string())
+                ),
+                (
+                    Value::Keyword(Keyword::from_namespace_and_name("person", "parent")),
+                    Value::String("Bob".to_string())
+                ),
+                (
+                    Value::Keyword(Keyword::from_name("ssn")),
+                    Value::String("123".to_string())
+                ),
+                (
+                    Value::Symbol(Symbol::from_name("friends")),
+                    Value::Vector(vec![
+                        Value::String("sally".to_string()),
+                        Value::String("john".to_string()),
+                        Value::String("linda".to_string())
+                    ])
+                ),
+                (
+                    Value::String("other".to_string()),
+                    Value::Map(vec![(
+                        Value::Keyword(Keyword::from_name("stuff")),
+                        Value::Keyword(Keyword::from_name("here"))
+                    )])
+                )
             ]),
-            parse("\
+            parse(
+                "\
             {:person/name \"Joe\"\
              :person/parent \"Bob\"\
              :ssn \"123\"\
              friends [\"sally\" \"john\" \"linda\"]\
-             \"other\" {:stuff :here}}").unwrap()
+             \"other\" {:stuff :here}}"
+            )
+            .unwrap()
         )
     }
 
     #[test]
     fn test_basic_keyword_and_symbol() {
-        assert!(
-            equal(
-                &parse("name").unwrap(),
-                &parse("name").unwrap()
-            )
-        );
-        assert!(
-            equal(
-                &parse("person/name").unwrap(),
-                &parse("person/name").unwrap()
-            )
-        );
-        assert!(
-            equal(
-                &parse(":name").unwrap(),
-                &parse(":name").unwrap()
-            )
-        );
-        assert!(
-            equal(
-                &parse(":person/name").unwrap(),
-                &parse(":person/name").unwrap()
-            )
-        );
+        assert!(equal(&parse("name").unwrap(), &parse("name").unwrap()));
+        assert!(equal(
+            &parse("person/name").unwrap(),
+            &parse("person/name").unwrap()
+        ));
+        assert!(equal(&parse(":name").unwrap(), &parse(":name").unwrap()));
+        assert!(equal(
+            &parse(":person/name").unwrap(),
+            &parse(":person/name").unwrap()
+        ));
 
         // Had an issue with whitespace
-        assert!(
-            equal(
-                &parse("name ").unwrap(),
-                &parse("name ").unwrap()
-            )
-        );
-        assert!(
-            equal(
-                &parse("person/name ").unwrap(),
-                &parse("person/name ").unwrap()
-            )
-        );
-        assert!(
-            equal(
-                &parse(":name ").unwrap(),
-                &parse(":name ").unwrap()
-            )
-        );
-        assert!(
-            equal(
-                &parse(":person/name ").unwrap(),
-                &parse(":person/name ").unwrap()
-            )
-        );
+        assert!(equal(&parse("name ").unwrap(), &parse("name ").unwrap()));
+        assert!(equal(
+            &parse("person/name ").unwrap(),
+            &parse("person/name ").unwrap()
+        ));
+        assert!(equal(&parse(":name ").unwrap(), &parse(":name ").unwrap()));
+        assert!(equal(
+            &parse(":person/name ").unwrap(),
+            &parse(":person/name ").unwrap()
+        ));
     }
 
     #[test]
     fn test_complex_equals() {
-        assert!(
-            equal(
-                &parse("\
+        assert!(equal(
+            &parse(
+                "\
             {:person/parent \"Bob\"\
              :person/name \"Joe\"\
              :ssn \"123\"\
              friends [\"sally\" \"john\" \"linda\"]\
-             \"other\" {:stuff :here}}").unwrap(),
-                &parse("\
+             \"other\" {:stuff :here}}"
+            )
+            .unwrap(),
+            &parse(
+                "\
             {:person/name \"Joe\"\
              :person/parent \"Bob\"\
              :ssn \"123\"\
              friends [\"sally\" \"john\" \"linda\"]\
-             \"other\" {:stuff :here}}").unwrap()
+             \"other\" {:stuff :here}}"
             )
-        )
+            .unwrap()
+        ))
     }
 
     #[test]
     fn test_nil_false_true() {
         assert_eq!(
-            Value::List(
-                vec![Value::Nil,
+            Value::List(vec![
+                Value::Nil,
                 Value::Boolean(false),
-                Value::Boolean(true)]
-            ),
+                Value::Boolean(true)
+            ]),
             parse("(nil false true)").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parse_char() {
+        assert_eq!(
+            Value::Map(vec![
+                (Value::Character(' '), Value::Character('z')),
+                (Value::Character('a'), Value::Character('\n')),
+                (Value::Character('b'), Value::Character('\r')),
+                (Value::Character('r'), Value::Character('c')),
+                (Value::Character('\t'), Value::Character('d')),
+
+            ]),
+            parse("{\\space \\z\\a \\newline \\b \\return \\r \\c \\tab \\d}").unwrap()
         )
     }
 }
