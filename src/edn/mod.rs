@@ -1,12 +1,12 @@
-pub mod keyword;
-mod symbol;
-
-use crate::edn::ParserError::UnexpectedEndOfInput;
+use chrono::format;
+use chrono::FixedOffset;
 use internship;
 use internship::IStr;
-use std::collections::{HashMap, HashSet};
+use itertools::Itertools;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Keyword {
@@ -86,7 +86,7 @@ impl Display for Symbol {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Nil,
     String(String),
@@ -100,10 +100,12 @@ pub enum Value {
     Map(Vec<(Value, Value)>),
     Set(Vec<Value>),
     Boolean(bool),
-    TaggedElement { tag: Symbol, value: Box<Value> },
+    Inst(chrono::DateTime<FixedOffset>),
+    Uuid(Uuid),
+    TaggedElement(Symbol, Box<Value>),
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 enum ParserError {
     #[error("The input was entirely blank")]
     EmptyInput,
@@ -111,11 +113,17 @@ enum ParserError {
     #[error("Unexpected end of input")]
     UnexpectedEndOfInput,
 
+    #[error("Invalid escape sequence in string")]
+    InvalidStringEscape,
+
     #[error("Invalid UTF-8")]
     InvalidUtf8 { chars: Vec<char> },
 
-    #[error("Duplicate values in a set")]
-    DuplicateValuesInSet { value: Value },
+    #[error("Duplicate value in a set")]
+    DuplicateValueInSet { value: Value },
+
+    #[error("Duplicate key in a map")]
+    DuplicateKeyInMap { value: Value },
 
     #[error("Only symbols can be used as tags")]
     InvalidElementForTag { value: Value },
@@ -126,11 +134,34 @@ enum ParserError {
     #[error("Invalid keyword")]
     InvalidKeyword,
 
+    #[error("Invalid Symbol")]
+    InvalidSymbol,
+
+    #[error("Map must have an even number of elements")]
+    OddNumberOfMapElements,
+
+    #[error("Error parsing #inst")]
+    InvalidInst(Option<chrono::format::ParseError>),
+
+    #[error("Error parsing #uuid")]
+    InvalidUuid(Option<uuid::Error>),
+
+    #[error("Cannot have slash at the beginning of symbol")]
+    CannotHaveSlashAtBeginningOfSymbol,
+
+    #[error("Cannot have slash at the end of symbol")]
+    CannotHaveSlashAtEndOfSymbol,
+
+    #[error("Cannot have more than one slash in a symbol")]
+    CannotHaveMoreThanOneSlashInSymbol,
+
     #[error("Unexpected Extra Input")]
     ExtraInput {
         parsed_value: Value,
         extra_input: Vec<char>,
     },
+
+
 }
 
 struct ParserSuccess<'a> {
@@ -141,19 +172,148 @@ struct ParserSuccess<'a> {
 #[derive(Debug)]
 enum ParserState {
     Begin,
-    ParsingList { values_so_far: Vec<Value> },
-    ParsingVector { values_so_far: Vec<Value> },
-    ParsingMap { entries_so_far: Vec<(Value, Value)> },
-    ParsingSet { values_so_far: Vec<Value> },
-    ParsingSymbol { characters_so_far: Vec<char> }, // Decide after parsing symbol if it is true, false, or nil
-    ParsingNumeric { characters_so_far: Vec<char> },
-    ParsingString { characters_so_far: Vec<char> },
-    SelectingDispatch { characters_so_far: Vec<char> },
+    ParsingList {
+        values_so_far: Vec<Value>,
+    },
+    ParsingVector {
+        values_so_far: Vec<Value>,
+    },
+    ParsingMap {
+        values_so_far: Vec<Value>,
+    },
+    ParsingSet {
+        values_so_far: Vec<Value>,
+    },
+    ParsingSymbol {
+        characters_before_a_slash: Vec<char>,
+        characters_after_a_slash: Vec<char>,
+        saw_slash: bool,
+    }, // Decide after parsing symbol if it is true, false, or nil
+    ParsingNumeric {
+        characters_so_far: Vec<char>,
+    },
+    ParsingString {
+        built_up: String,
+    },
+    SelectingDispatch {
+        characters_so_far: Vec<char>,
+    },
 }
 
 /// Commas are considered whitespace for EDN
 fn is_whitespace(c: char) -> bool {
     c.is_whitespace() || c == ','
+}
+
+fn is_allowed_anywhere_symbol_character(c: char) -> bool {
+    c == '.'
+        || c == '*'
+        || c == '+'
+        || c == '!'
+        || c == '-'
+        || c == '_'
+        || c == '?'
+        || c == '$'
+        || c == '%'
+        || c == '&'
+        || c == '='
+        || c == '<'
+        || c == '>'
+        || c.is_alphabetic()
+}
+
+fn is_allowed_symbol_after_first_character(c: char) -> bool {
+    is_allowed_anywhere_symbol_character(c) || c.is_numeric()
+}
+
+fn equal(v1: &Value, v2: &Value) -> bool {
+    match (v1, v2) {
+        // nil, booleans, strings, characters, and symbols
+        // are equal to values of the same type with the same edn representation
+        (Value::Nil, Value::Nil) => true,
+        (Value::Boolean(b1), Value::Boolean(b2)) => b1 == b2,
+        (Value::String(s1), Value::String(s2)) => s1 == s2,
+        (Value::Character(c1), Value::Character(c2)) => c1 == c2,
+        (Value::Symbol(s1), Value::Symbol(s2)) => s1 == s2,
+
+        // integers and floating point numbers should be considered equal to values only of the
+        // same magnitude, type, and precision. Comingling numeric types and precision in
+        // map/set key/elements, or constituents therein, is not advised.
+        (Value::Float(f1), Value::Float(f2)) => f1 == f2,
+        (Value::Integer(i1), Value::Integer(i2)) => i1 == i2,
+
+        // sequences (lists and vectors) are equal to other sequences whose count
+        // of elements is the same, and for which each corresponding pair of
+        // elements (by ordinal) is equal.
+        (Value::List(vals1) | Value::Vector(vals1), Value::List(vals2) | Value::Vector(vals2)) => {
+            if vals1.len() != vals2.len() {
+                false
+            } else {
+                vals1
+                    .iter()
+                    .zip(vals2.iter())
+                    .fold(true, |all_same, (v1, v2)| all_same && equal(v1, v2))
+            }
+        }
+
+        // sets are equal if they have the same count of elements and,
+        // for every element in one set, an equal element is in the other.
+        (Value::Set(vals1), Value::Set(vals2)) => {
+            if vals1.len() != vals2.len() {
+                false
+            } else {
+                for v1 in vals1 {
+                    let mut found = false;
+                    for v2 in vals2 {
+                        if equal(v1, v2) {
+                            found = true;
+                        }
+                    }
+                    if !found {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        // maps are equal if they have the same number of entries,
+        // and for every key/value entry in one map an equal key is present
+        // and mapped to an equal value in the other.
+        (Value::Map(entries1), Value::Map(entries2)) => {
+            if entries1.len() != entries2.len() {
+                false
+            } else {
+                for (v1, k1) in entries1 {
+                    let mut found = false;
+                    for (v2, k2) in entries2 {
+                        if equal(v1, v2) && equal(k1, k2) {
+                            found = true;
+                        }
+                    }
+                    if !found {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        // tagged elements must define their own equality semantics.
+        // #uuid elements are equal if their canonic representations are equal.
+        // #inst elements are equal if their representation strings designate
+        // the same timestamp per RFC-3339.
+        (Value::Uuid(uuid1), Value::Uuid(uuid2)) => uuid1 == uuid2,
+        (Value::Inst(dt1), Value::Inst(dt2)) => dt1 == dt2,
+        (Value::TaggedElement(tag1, value1), Value::TaggedElement(tag2, value2)) => {
+            equal(&Value::Symbol(tag1.clone()), &Value::Symbol(tag2.clone()))
+                && equal(value1, value2)
+        }
+
+        _ => false,
+    }
 }
 
 /// Likely *very* suboptimal parsing. Focus for now should be getting actually correct
@@ -183,21 +343,21 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                 parse_helper(
                     &s[1..],
                     ParserState::ParsingMap {
-                        entries_so_far: vec![],
+                        values_so_far: vec![],
                     },
                 )
             } else if s[0] == '"' {
                 parse_helper(
                     &s[1..],
                     ParserState::ParsingString {
-                        characters_so_far: vec![],
+                        built_up: "".to_string(),
                     },
                 )
             } else if s[0] == ':' {
-                /// For parsing a keyword, we can just fall back on the logic for parsing a symbol
-                /// **somewhat** of a hack and it means we need to move the logic for converting
-                /// symbols for true, false, and nil higher up and the error messages might
-                /// end up strange but i am okay with that.
+                // For parsing a keyword, we can just fall back on the logic for parsing a symbol
+                // **somewhat** of a hack and it means we need to move the logic for converting
+                // symbols for true, false, and nil higher up and the error messages might
+                // end up strange but i am okay with that.
                 let ParserSuccess {
                     remaining_input,
                     value,
@@ -222,9 +382,11 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                 )
             } else if s[0].is_alphabetic() {
                 parse_helper(
-                    &s[1..],
+                    &s,
                     ParserState::ParsingSymbol {
-                        characters_so_far: vec![s[0]],
+                        characters_before_a_slash: vec![],
+                        characters_after_a_slash: vec![],
+                        saw_slash: true,
                     },
                 )
             } else if s[0].is_numeric() {
@@ -241,7 +403,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
 
         ParserState::ParsingList { mut values_so_far } => {
             if s.len() == 0 {
-                Err(UnexpectedEndOfInput)
+                Err(ParserError::UnexpectedEndOfInput)
             } else if is_whitespace(s[0]) {
                 parse_helper(&s[1..], ParserState::ParsingList { values_so_far })
             } else if s[0] == ')' {
@@ -259,10 +421,10 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
             }
         }
 
-        /// Almost total duplicate of ParsingList
+        // Almost total duplicate of ParsingList
         ParserState::ParsingVector { mut values_so_far } => {
             if s.len() == 0 {
-                Err(UnexpectedEndOfInput)
+                Err(ParserError::UnexpectedEndOfInput)
             } else if is_whitespace(s[0]) {
                 parse_helper(&s[1..], ParserState::ParsingVector { values_so_far })
             } else if s[0] == ']' {
@@ -283,17 +445,253 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
             }
         }
 
+        ParserState::ParsingMap { mut values_so_far } => {
+            if s.len() == 0 {
+                Err(ParserError::UnexpectedEndOfInput)
+            } else if is_whitespace(s[0]) {
+                parse_helper(&s[1..], ParserState::ParsingMap { values_so_far })
+            } else if s[0] == '}' {
+                if values_so_far.len() % 2 != 0 {
+                    Err(ParserError::OddNumberOfMapElements)
+                } else {
+                    // I'm confident there has to be a better way to do this
+                    let entries: Vec<(Value, Value)> = values_so_far
+                        .into_iter()
+                        .batching(|it| match it.next() {
+                            None => None,
+                            Some(x) => match it.next() {
+                                None => None,
+                                Some(y) => Some((x, y)),
+                            },
+                        })
+                        .collect();
+
+                    // Floats can't be put in a hashset, so we need to get creative
+                    for (k1, _) in entries.iter() {
+                        let mut count = 0;
+                        for (k2, _) in entries.iter() {
+                            if equal(k1, k2) {
+                                count += 1;
+                            }
+                        }
+                        if count > 1 {
+                            return Err(ParserError::DuplicateKeyInMap { value: k1.clone() });
+                        }
+                    }
+                    let value = Value::Map(entries);
+
+                    Ok(ParserSuccess {
+                        remaining_input: &s[1..],
+                        value,
+                    })
+                }
+            } else {
+                let ParserSuccess {
+                    remaining_input,
+                    value,
+                } = parse_helper(s, ParserState::Begin)?;
+                values_so_far.push(value);
+                parse_helper(remaining_input, ParserState::ParsingMap { values_so_far })
+            }
+        }
+
+        ParserState::ParsingSet { mut values_so_far } => {
+            if s.len() == 0 {
+                Err(ParserError::UnexpectedEndOfInput)
+            } else if is_whitespace(s[0]) {
+                parse_helper(&s[1..], ParserState::ParsingSet { values_so_far })
+            } else if s[0] == '}' {
+                for v1 in values_so_far.iter() {
+                    let mut count = 0;
+                    for v2 in values_so_far.iter() {
+                        if equal(v1, v2) {
+                            count += 1;
+                        }
+                    }
+                    if count > 1 {
+                        return Err(ParserError::DuplicateValueInSet { value: v1.clone() });
+                    }
+                }
+                Ok(ParserSuccess {
+                    remaining_input: &s[1..],
+                    value: Value::Set(values_so_far),
+                })
+            } else {
+                let ParserSuccess {
+                    remaining_input,
+                    value,
+                } = parse_helper(s, ParserState::Begin)?;
+                values_so_far.push(value);
+                parse_helper(remaining_input, ParserState::ParsingSet { values_so_far })
+            }
+        }
+
+        ParserState::ParsingSymbol {
+            mut characters_before_a_slash,
+            mut characters_after_a_slash,
+            saw_slash,
+        } => {
+            if s.is_empty() {
+                if characters_before_a_slash.is_empty() {
+                    Err(ParserError::UnexpectedEndOfInput)
+                }
+                else if characters_after_a_slash.is_empty() {
+                    if saw_slash {
+                        Err(ParserError::UnexpectedEndOfInput)
+                    }
+                    else {
+                        let name: String = characters_before_a_slash.into_iter().collect();
+                        Ok(ParserSuccess {
+                            remaining_input: s,
+                            value: Value::Symbol(Symbol::from_name(&name))
+                        })
+                    }
+                }
+                else {
+                    Err(ParserError::UnexpectedEndOfInput)
+                }
+            } else {
+                if characters_before_a_slash.is_empty() && !saw_slash {
+                    if is_allowed_anywhere_symbol_character(s[0]) {
+                        characters_before_a_slash.push(s[0]);
+                        parse_helper(&s[1..], ParserState::ParsingSymbol {
+                            characters_before_a_slash,
+                            characters_after_a_slash,
+                            saw_slash
+                        })
+                    }
+                    else if s[0] == '/' {
+                        if s.len() > 1 && is_allowed_symbol_after_first_character(s[1]) {
+                            Err(ParserError::CannotHaveSlashAtBeginningOfSymbol)
+                        }
+                        else {
+                            Ok(ParserSuccess {
+                                remaining_input: &s[1..],
+                                value: Value::Symbol(Symbol::from_name("/"))
+                            })
+                        }
+                    }
+                    else {
+                        Err(ParserError::UnexpectedCharacter(s[0]))
+                    }
+                }
+                else if !saw_slash {
+                    if is_allowed_symbol_after_first_character(s[0]) {
+                        characters_before_a_slash.push(s[0]);
+                        parse_helper(&s[1..], ParserState::ParsingSymbol {
+                            characters_before_a_slash,
+                            characters_after_a_slash,
+                            saw_slash
+                        })
+                    }
+                    else if s[0] == '/' {
+                        if s.len() > 1 && !is_allowed_symbol_after_first_character(s[1]) {
+                            Err(ParserError::CannotHaveSlashAtEndOfSymbol)
+                        }
+                        else {
+                            parse_helper(
+                                &s[1..],
+                                ParserState::ParsingSymbol {
+                                    characters_before_a_slash,
+                                    characters_after_a_slash,
+                                    saw_slash: true
+                                }
+                            )
+                        }
+                    }
+                    else {
+                        Err(ParserError::UnexpectedCharacter(s[0]))
+                    }
+                }
+                else {
+                    if (characters_after_a_slash.is_empty() && is_allowed_anywhere_symbol_character(s[0])) ||
+                        is_allowed_symbol_after_first_character(s[0]) {
+                        characters_after_a_slash.push(s[0]);
+                        parse_helper(&s[1..], ParserState::ParsingSymbol {
+                            characters_before_a_slash,
+                            characters_after_a_slash,
+                            saw_slash
+                        })
+                    }
+                    else if s[0] == '/' {
+                        Err(ParserError::CannotHaveMoreThanOneSlashInSymbol)
+                    }
+                    else {
+                        Err(ParserError::UnexpectedCharacter(s[0]))
+                    }
+                }
+
+            }
+        }
+
+        ParserState::ParsingString { mut built_up } => {
+            if s.len() == 0 {
+                Err(ParserError::UnexpectedEndOfInput)
+            } else if s[0] == '"' {
+                Ok(ParserSuccess {
+                    remaining_input: &s[1..],
+                    value: Value::String(built_up)
+                })
+            } else if s[0] == '\\' {
+                if s.len() == 1 {
+                    Err(ParserError::InvalidStringEscape)
+                } else {
+                    match s[1] {
+                        't' => {
+                            built_up.push('\t')
+                        },
+                        'r' => {
+                            built_up.push('\r')
+                        },
+                        'n' => {
+                            built_up.push('\n')
+                        },
+
+                        '\\' => {
+                            built_up.push('\\')
+                        },
+                        '"' => {
+                            built_up.push('"')
+                        },
+                        'b' => {
+                            built_up.push('b')
+                        },
+                        'f' => {
+                            built_up.push('f')
+                        }
+                        'u' => {
+                            return if s.len() >= 5 {
+                                let str: String = s[2..6].into_iter().map(|c| *c).collect();
+                                let unicode = u32::from_str_radix(&str, 16)
+                                    .map_err(|_| ParserError::InvalidStringEscape)?;
+                                match char::from_u32(unicode) {
+                                    None => return Err(ParserError::InvalidStringEscape),
+                                    Some(c) => built_up.push(c)
+                                }
+                                parse_helper(&s[6..], ParserState::ParsingString { built_up })
+                            } else {
+                                Err(ParserError::InvalidStringEscape)
+                            }
+                        }
+                        _ => return Err(ParserError::InvalidStringEscape)
+                    }
+                    parse_helper(&s[2..], ParserState::ParsingString { built_up })
+                }
+            }
+            else {
+                built_up.push(s[0]);
+                parse_helper(&s[1..], ParserState::ParsingString { built_up })
+            }
+        }
         /*
-        ParserState::ParsingMap { .. } => {}
-        ParserState::ParsingSet { .. } => {}
-        ParserState::ParsingSymbol { .. } => {}
+
         ParserState::ParsingNumeric { .. } => {}
         ParserState::ParsingString { .. } => {} */
         ParserState::SelectingDispatch { characters_so_far } => {
             if s.len() == 0 {
-                Err(UnexpectedEndOfInput)
+                Err(ParserError::UnexpectedEndOfInput)
             } else if s[0] == '_' && characters_so_far.len() == 0 {
-                /// Drop the next form. Still error if that form is malformed
+                // Drop the next form. Still error if that form is malformed
                 let ParserSuccess {
                     remaining_input, ..
                 } = parse_helper(&s[1..], ParserState::Begin)?;
@@ -306,8 +704,8 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                     },
                 )
             } else {
-                /// We expect to read a symbol next and we will associate that symbol as the tag of
-                /// the following element
+                // We expect to read a symbol next and we will associate that symbol as the tag of
+                // the following element
                 let ParserSuccess {
                     remaining_input,
                     value,
@@ -315,13 +713,43 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                 match value {
                     Value::Symbol(symbol) => {
                         let next_success = parse_helper(remaining_input, ParserState::Begin)?;
-                        Ok(ParserSuccess {
-                            remaining_input: next_success.remaining_input,
-                            value: Value::TaggedElement {
-                                tag: symbol,
-                                value: Box::new(next_success.value),
-                            },
-                        })
+
+                        // Handle builtin #inst
+                        if symbol.namespace == None && symbol.name == "inst" {
+                            if let Value::String(timestamp) = next_success.value {
+                                let datetime = chrono::DateTime::parse_from_rfc3339(&timestamp)
+                                    .map_err(|parse_error| {
+                                        ParserError::InvalidInst(Some(parse_error))
+                                    })?;
+                                Ok(ParserSuccess {
+                                    remaining_input: next_success.remaining_input,
+                                    value: Value::Inst(datetime),
+                                })
+                            } else {
+                                Err(ParserError::InvalidInst(None))
+                            }
+                        }
+                        // Handle builtin #uuid
+                        else if symbol.namespace == None && symbol.name == "uuid" {
+                            if let Value::String(uuid_str) = next_success.value {
+                                let uuid = Uuid::parse_str(&uuid_str).map_err(|parse_error| {
+                                    ParserError::InvalidUuid(Some(parse_error))
+                                })?;
+                                Ok(ParserSuccess {
+                                    remaining_input: next_success.remaining_input,
+                                    value: Value::Uuid(uuid),
+                                })
+                            } else {
+                                Err(ParserError::InvalidUuid(None))
+                            }
+                        }
+                        // Everything else becomes a generic TaggedElement
+                        else {
+                            Ok(ParserSuccess {
+                                remaining_input: next_success.remaining_input,
+                                value: Value::TaggedElement(symbol, Box::new(next_success.value)),
+                            })
+                        }
                     }
                     _ => Err(ParserError::InvalidElementForTag { value }),
                 }
@@ -332,9 +760,10 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
     }
 }
 
-/// Parse EDN from the given input string
+// Parse EDN from the given input string
 fn parse(s: &str) -> Result<Value, ParserError> {
     let chars: Vec<char> = s.chars().collect();
+    // TODO: pre-strip comments
     let ParserSuccess {
         remaining_input,
         value,
@@ -347,11 +776,13 @@ fn parse(s: &str) -> Result<Value, ParserError> {
             });
         }
     }
+    /// TODO: Crawl tree and convert `true`, `false`, and `nil` symbols to the proper values
     Ok(value)
 }
 
 #[cfg(test)]
 mod tests {
+    use chrono::DateTime;
     use super::*;
 
     #[test]
@@ -405,6 +836,117 @@ mod tests {
                 Value::Vector(vec![])
             ]),
             parse("   ,, , [ ,, , ,()[,,,]( ) []]").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parsing_empty_map() {
+        assert_eq!(Value::Map(vec![]), parse("{}").unwrap())
+    }
+
+    #[test]
+    fn test_parsing_uneven_map() {
+        assert_eq!(Err(ParserError::OddNumberOfMapElements), parse("{()}"));
+        assert_eq!(
+            Err(ParserError::OddNumberOfMapElements),
+            parse("{() [] []}")
+        )
+    }
+
+    #[test]
+    fn test_parsing_even_map() {
+        assert_eq!(
+            Value::Map(vec![(Value::List(vec![]), Value::List(vec![]))]),
+            parse("{() ()}").unwrap()
+        );
+        assert_eq!(
+            Value::Map(vec![
+                (Value::List(vec![]), Value::Vector(vec![])),
+                (Value::Vector(vec![]), Value::List(vec![]))
+            ]),
+            parse("{()[] [] ()}").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parsing_duplicate_map_keys() {
+        assert_eq!(
+            Value::Map(vec![(Value::List(vec![]), Value::List(vec![]))]),
+            parse("{() ()}").unwrap()
+        );
+        assert_eq!(
+            Err(ParserError::DuplicateKeyInMap {
+                value: Value::List(vec![])
+            }),
+            parse("{()[] () ()}")
+        )
+    }
+
+    #[test]
+    fn test_equals_for_list_and_vector() {
+        assert!(equal(&Value::List(vec![]), &Value::Vector(vec![])));
+        assert!(equal(
+            &Value::List(vec![Value::Boolean(true)]),
+            &Value::Vector(vec![Value::Boolean(true)])
+        ));
+        assert!(!equal(
+            &Value::List(vec![Value::Boolean(true)]),
+            &Value::Vector(vec![Value::Boolean(false)])
+        ));
+        assert!(!equal(
+            &Value::List(vec![Value::Boolean(true)]),
+            &Value::Vector(vec![Value::Boolean(true), Value::Boolean(true)])
+        ));
+    }
+
+    #[test]
+    fn test_parsing_string() {
+        assert_eq!(
+            Value::String("ꪪ".to_string()),
+            parse("\"\\uAAAA\"").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parsing_string_nested() {
+        assert_eq!(
+            Value::Vector(vec![Value::String("ꪪ".to_string())]),
+            parse("[\"\\uAAAA\"]").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parsing_multiline_string() {
+        assert_eq!(
+            Value::String("abc\n    \ndef    \n".to_string()),
+            parse("\"abc\n    \ndef    \n\"").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parsing_string_map() {
+        assert_eq!(
+            Value::Map(vec![
+                (Value::String("abc".to_string()), Value::String("def".to_string()))
+            ]),
+            parse("{\"abc\" \"def\"}").unwrap()
+        );
+
+        assert_eq!(
+            Value::Map(vec![
+                (Value::String("abc".to_string()), Value::String("def".to_string()))
+            ]),
+            parse("{\"abc\"\"def\"}").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parsing_inst() {
+        assert_eq!(
+            Value::Inst(
+                DateTime::parse_from_rfc3339("1985-04-12T23:20:50.52Z").unwrap()
+            ),
+            parse("#inst\"1985-04-12T23:20:50.52Z\"").unwrap()
         )
     }
 }

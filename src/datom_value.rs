@@ -1,8 +1,8 @@
 use crate::edn::Keyword;
 use crate::entity_id::EntityId;
 use bigdecimal::BigDecimal;
+use chrono::{DateTime, FixedOffset};
 use num_bigint::BigInt;
-use std::time;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -47,7 +47,7 @@ pub enum DatomValue {
     Boolean(bool),
     Double(f64),
     Float(f32),
-    Instant(time::Instant),
+    Instant(DateTime<FixedOffset>),
     Keyword(Box<Keyword>),
     Long(i64),
     Ref(EntityId),
