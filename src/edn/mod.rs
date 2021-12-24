@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use thiserror::Error;
 use uuid::Uuid;
+use test::RunIgnored::No;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Keyword {
@@ -193,6 +194,7 @@ enum ParserState {
     ParsingString {
         built_up: String,
     },
+    ParsingCharacter,
     SelectingDispatch,
 }
 
@@ -758,6 +760,62 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
     }
 }
 
+fn replace_nil_false_true(value: Value) -> Value {
+    match value {
+        Value::Nil => Value::Nil,
+        Value::String(s) => Value::String(s),
+        Value::Character(c) => Value::Character(c)
+        Value::Symbol(symbol) => {
+            if symbol.namespace == None {
+                if symbol.name == "true" {
+                    Value::Boolean(true)
+                }
+                else if symbol.name == "false" {
+                    Value::Boolean(false)
+                }
+                else if symbol.name == "nil" {
+                    Value::Nil
+                }
+                else {
+                    Value::Symbol(symbol)
+                }
+            }
+            else {
+                Value::Symbol(symbol)
+            }
+        }
+        Value::Keyword(k) => Value::Keyword(k),
+        Value::Integer(i) => Value::Integer(i),
+        Value::Float(f) => Value::Float(f),
+        Value::List(elements) => Value::List(
+            elements
+                .into_iter()
+                .map(|element| replace_nil_false_true(element))
+                .collect()
+        ),
+        Value::Vector(elements) => Value::Vector(
+            elements
+                .into_iter()
+                .map(|element| replace_nil_false_true(element))
+                .collect()
+        ),
+        Value::Map(entries) => Value::Map(
+            entries.into_iter()
+                .map(|(k, v)| (replace_nil_false_true(k), replace_nil_false_true(v)))
+                .collect()
+        ),
+        Value::Set(elements) => Value::Set(
+            elements
+                .into_iter()
+                .map(|element| replace_nil_false_true(element))
+                .collect()
+        ),
+        Value::Boolean(b) => Value::Boolean(b),
+        Value::Inst(inst) => Value::Inst(inst),
+        Value::Uuid(uuid) => Value::Uuid(uuid),
+        Value::TaggedElement(tag, val) => Value::TaggedElement(tag, replace_nil_false_true(val))
+    }
+}
 // Parse EDN from the given input string
 fn parse(s: &str) -> Result<Value, ParserError> {
     let chars: Vec<char> = s.chars().collect();
