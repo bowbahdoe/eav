@@ -160,8 +160,6 @@ enum ParserError {
         parsed_value: Value,
         extra_input: Vec<char>,
     },
-
-
 }
 
 struct ParserSuccess<'a> {
@@ -375,11 +373,8 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                     Err(ParserError::InvalidKeyword)
                 }
             } else if s[0] == '#' {
-                parse_helper(
-                    &s[1..],
-                    ParserState::SelectingDispatch,
-                )
-            } else if s[0].is_alphabetic() {
+                parse_helper(&s[1..], ParserState::SelectingDispatch)
+            } else if is_allowed_anywhere_symbol_character(s[0]) || s[0] == '/' {
                 parse_helper(
                     &s,
                     ParserState::ParsingSymbol {
@@ -533,101 +528,103 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
             if s.is_empty() {
                 if characters_before_a_slash.is_empty() {
                     Err(ParserError::UnexpectedEndOfInput)
-                }
-                else if characters_after_a_slash.is_empty() {
+                } else if characters_after_a_slash.is_empty() {
                     if saw_slash {
                         Err(ParserError::UnexpectedEndOfInput)
-                    }
-                    else {
+                    } else {
                         let name: String = characters_before_a_slash.into_iter().collect();
                         Ok(ParserSuccess {
                             remaining_input: s,
-                            value: Value::Symbol(Symbol::from_name(&name))
+                            value: Value::Symbol(Symbol::from_name(&name)),
                         })
                     }
-                }
-                else {
+                } else {
                     Err(ParserError::UnexpectedEndOfInput)
                 }
             } else {
                 if characters_before_a_slash.is_empty() && !saw_slash {
                     if is_allowed_anywhere_symbol_character(s[0]) {
                         characters_before_a_slash.push(s[0]);
-                        parse_helper(&s[1..], ParserState::ParsingSymbol {
-                            characters_before_a_slash,
-                            characters_after_a_slash,
-                            saw_slash
-                        })
-                    }
-                    else if s[0] == '/' {
+                        parse_helper(
+                            &s[1..],
+                            ParserState::ParsingSymbol {
+                                characters_before_a_slash,
+                                characters_after_a_slash,
+                                saw_slash,
+                            },
+                        )
+                    } else if s[0] == '/' {
                         if s.len() > 1 && is_allowed_symbol_after_first_character(s[1]) {
                             Err(ParserError::CannotHaveSlashAtBeginningOfSymbol)
-                        }
-                        else {
+                        } else {
                             Ok(ParserSuccess {
                                 remaining_input: &s[1..],
-                                value: Value::Symbol(Symbol::from_name("/"))
+                                value: Value::Symbol(Symbol::from_name("/")),
                             })
                         }
-                    }
-                    else {
+                    } else {
                         Err(ParserError::UnexpectedCharacter(s[0]))
                     }
-                }
-                else if !saw_slash {
+                } else if !saw_slash {
                     if is_allowed_symbol_after_first_character(s[0]) {
                         characters_before_a_slash.push(s[0]);
-                        parse_helper(&s[1..], ParserState::ParsingSymbol {
-                            characters_before_a_slash,
-                            characters_after_a_slash,
-                            saw_slash
-                        })
-                    }
-                    else if s[0] == '/' {
-                        if s.len() > 1 && !is_allowed_symbol_after_first_character(s[1]) {
+                        parse_helper(
+                            &s[1..],
+                            ParserState::ParsingSymbol {
+                                characters_before_a_slash,
+                                characters_after_a_slash,
+                                saw_slash,
+                            },
+                        )
+                    } else if s[0] == '/' {
+                        if s.len() == 1
+                            || (s.len() > 1 && !is_allowed_symbol_after_first_character(s[1]))
+                        {
                             Err(ParserError::CannotHaveSlashAtEndOfSymbol)
-                        }
-                        else {
+                        } else {
                             parse_helper(
                                 &s[1..],
                                 ParserState::ParsingSymbol {
                                     characters_before_a_slash,
                                     characters_after_a_slash,
-                                    saw_slash: true
-                                }
+                                    saw_slash: true,
+                                },
                             )
                         }
-                    }
-                    else {
+                    } else {
                         let name: String = characters_before_a_slash.into_iter().collect();
                         Ok(ParserSuccess {
                             remaining_input: s,
-                            value: Value::Symbol(Symbol::from_name(&name))
+                            value: Value::Symbol(Symbol::from_name(&name)),
                         })
                     }
-                }
-                else {
-                    if (characters_after_a_slash.is_empty() && is_allowed_anywhere_symbol_character(s[0])) ||
-                        is_allowed_symbol_after_first_character(s[0]) {
+                } else {
+                    if (characters_after_a_slash.is_empty()
+                        && is_allowed_anywhere_symbol_character(s[0]))
+                        || is_allowed_symbol_after_first_character(s[0])
+                    {
                         characters_after_a_slash.push(s[0]);
-                        parse_helper(&s[1..], ParserState::ParsingSymbol {
-                            characters_before_a_slash,
-                            characters_after_a_slash,
-                            saw_slash
-                        })
-                    }
-                    else if s[0] == '/' {
+                        parse_helper(
+                            &s[1..],
+                            ParserState::ParsingSymbol {
+                                characters_before_a_slash,
+                                characters_after_a_slash,
+                                saw_slash,
+                            },
+                        )
+                    } else if s[0] == '/' {
                         Err(ParserError::CannotHaveMoreThanOneSlashInSymbol)
-                    }
-                    else {
-                        let name: String = characters_before_a_slash.into_iter().collect();
+                    } else {
+                        let namespace: String = characters_before_a_slash.into_iter().collect();
+                        let name: String = characters_after_a_slash.into_iter().collect();
                         Ok(ParserSuccess {
                             remaining_input: s,
-                            value: Value::Symbol(Symbol::from_name(&name))
+                            value: Value::Symbol(Symbol::from_namespace_and_name(
+                                &namespace, &name,
+                            )),
                         })
                     }
                 }
-
             }
         }
 
@@ -637,35 +634,21 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
             } else if s[0] == '"' {
                 Ok(ParserSuccess {
                     remaining_input: &s[1..],
-                    value: Value::String(built_up)
+                    value: Value::String(built_up),
                 })
             } else if s[0] == '\\' {
                 if s.len() == 1 {
                     Err(ParserError::InvalidStringEscape)
                 } else {
                     match s[1] {
-                        't' => {
-                            built_up.push('\t')
-                        },
-                        'r' => {
-                            built_up.push('\r')
-                        },
-                        'n' => {
-                            built_up.push('\n')
-                        },
+                        't' => built_up.push('\t'),
+                        'r' => built_up.push('\r'),
+                        'n' => built_up.push('\n'),
 
-                        '\\' => {
-                            built_up.push('\\')
-                        },
-                        '"' => {
-                            built_up.push('"')
-                        },
-                        'b' => {
-                            built_up.push('b')
-                        },
-                        'f' => {
-                            built_up.push('f')
-                        }
+                        '\\' => built_up.push('\\'),
+                        '"' => built_up.push('"'),
+                        'b' => built_up.push('b'),
+                        'f' => built_up.push('f'),
                         'u' => {
                             return if s.len() >= 5 {
                                 let str: String = s[2..6].into_iter().map(|c| *c).collect();
@@ -673,19 +656,18 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                                     .map_err(|_| ParserError::InvalidStringEscape)?;
                                 match char::from_u32(unicode) {
                                     None => return Err(ParserError::InvalidStringEscape),
-                                    Some(c) => built_up.push(c)
+                                    Some(c) => built_up.push(c),
                                 }
                                 parse_helper(&s[6..], ParserState::ParsingString { built_up })
                             } else {
                                 Err(ParserError::InvalidStringEscape)
                             }
                         }
-                        _ => return Err(ParserError::InvalidStringEscape)
+                        _ => return Err(ParserError::InvalidStringEscape),
                     }
                     parse_helper(&s[2..], ParserState::ParsingString { built_up })
                 }
-            }
-            else {
+            } else {
                 built_up.push(s[0]);
                 parse_helper(&s[1..], ParserState::ParsingString { built_up })
             }
@@ -789,8 +771,8 @@ fn parse(s: &str) -> Result<Value, ParserError> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::DateTime;
     use super::*;
+    use chrono::DateTime;
 
     #[test]
     fn test_display_symbol() {
@@ -933,16 +915,18 @@ mod tests {
     #[test]
     fn test_parsing_string_map() {
         assert_eq!(
-            Value::Map(vec![
-                (Value::String("abc".to_string()), Value::String("def".to_string()))
-            ]),
+            Value::Map(vec![(
+                Value::String("abc".to_string()),
+                Value::String("def".to_string())
+            )]),
             parse("{\"abc\" \"def\"}").unwrap()
         );
 
         assert_eq!(
-            Value::Map(vec![
-                (Value::String("abc".to_string()), Value::String("def".to_string()))
-            ]),
+            Value::Map(vec![(
+                Value::String("abc".to_string()),
+                Value::String("def".to_string())
+            )]),
             parse("{\"abc\"\"def\"}").unwrap()
         )
     }
@@ -950,10 +934,154 @@ mod tests {
     #[test]
     fn test_parsing_inst() {
         assert_eq!(
-            Value::Inst(
-                DateTime::parse_from_rfc3339("1985-04-12T23:20:50.52Z").unwrap()
-            ),
+            Value::Inst(DateTime::parse_from_rfc3339("1985-04-12T23:20:50.52Z").unwrap()),
             parse("#inst\"1985-04-12T23:20:50.52Z\"").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parsing_uuid() {
+        assert_eq!(
+            Value::Uuid(Uuid::parse_str("f81d4fae-7dec-11d0-a765-00a0c91e6bf6").unwrap()),
+            parse("#uuid\"f81d4fae-7dec-11d0-a765-00a0c91e6bf6\"").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_parsing_symbol() {
+        assert_eq!(
+            Value::Vector(vec![
+                Value::Symbol(Symbol::from_name("a")),
+                Value::Symbol(Symbol::from_name("abc")),
+                Value::Symbol(Symbol::from_namespace_and_name("abc", "def")),
+                Value::Symbol(Symbol::from_name("->")),
+                Value::Symbol(Symbol::from_name("/")),
+                Value::Symbol(Symbol::from_namespace_and_name("my.org", "stuff")),
+            ]),
+            parse("[ a  abc abc/def -> / my.org/stuff ]").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_parsing_symbol_errs() {
+        assert_eq!(
+            Err(ParserError::CannotHaveSlashAtBeginningOfSymbol),
+            parse("/abc")
+        );
+        assert_eq!(
+            Err(ParserError::CannotHaveSlashAtEndOfSymbol),
+            parse("abc/")
+        );
+        assert_eq!(
+            Err(ParserError::CannotHaveSlashAtEndOfSymbol),
+            parse("abc/ ")
+        );
+        assert_eq!(
+            Err(ParserError::CannotHaveSlashAtEndOfSymbol),
+            parse("abc/ []")
+        );
+        assert_eq!(
+            Err(ParserError::CannotHaveMoreThanOneSlashInSymbol),
+            parse("a/b/c")
+        );
+    }
+
+    #[test]
+    fn test_parsing_keyword() {
+        assert_eq!(
+            Value::Vector(vec![
+                Value::Keyword(Keyword::from_name("a")),
+                Value::Keyword(Keyword::from_name("abc")),
+                Value::Keyword(Keyword::from_namespace_and_name("abc", "def")),
+                Value::Keyword(Keyword::from_name("->")),
+                Value::Keyword(Keyword::from_name("/")),
+                Value::Keyword(Keyword::from_namespace_and_name("my.org", "stuff")),
+            ]),
+            parse("[ :a  :abc :abc/def :-> :/ :my.org/stuff ]").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_parsing_keyword_errs() {
+        assert_eq!(
+            Err(ParserError::CannotHaveSlashAtBeginningOfSymbol),
+            parse(":/abc")
+        );
+        assert_eq!(
+            Err(ParserError::CannotHaveSlashAtEndOfSymbol),
+            parse(":abc/")
+        );
+        assert_eq!(
+            Err(ParserError::CannotHaveSlashAtEndOfSymbol),
+            parse(":abc/ ")
+        );
+        assert_eq!(
+            Err(ParserError::CannotHaveSlashAtEndOfSymbol),
+            parse(":abc/ []")
+        );
+        assert_eq!(
+            Err(ParserError::CannotHaveMoreThanOneSlashInSymbol),
+            parse(":a/b/c")
+        );
+        assert_eq!(Err(ParserError::InvalidKeyword), parse("::namespaced"));
+    }
+
+    #[test]
+    fn test_parse_set() {
+        assert_eq!(
+            Value::Set(vec![
+                Value::Keyword(Keyword::from_name("abc")),
+                Value::Keyword(Keyword::from_name("def")),
+                Value::Keyword(Keyword::from_namespace_and_name("ghi", "jkl"))
+            ]),
+            parse("#{:abc :def :ghi/jkl }").unwrap()
+        );
+
+        assert_eq!(
+            Err(ParserError::DuplicateValueInSet {
+                value: Value::Symbol(Symbol::from_name("a"))
+            }),
+            parse("#{a b c d e f a g h}")
+        )
+    }
+
+    #[test]
+    fn test_set_equals() {
+        assert!(equal(
+            &Value::Set(vec![
+                Value::Keyword(Keyword::from_name("def")),
+                Value::Keyword(Keyword::from_namespace_and_name("ghi", "jkl")),
+                Value::Keyword(Keyword::from_name("abc"))
+            ]),
+            &Value::Set(vec![
+                Value::Keyword(Keyword::from_name("abc")),
+                Value::Keyword(Keyword::from_name("def")),
+                Value::Keyword(Keyword::from_namespace_and_name("ghi", "jkl"))
+            ])
+        ))
+    }
+    #[test]
+    fn test_example_map() {
+        assert_eq!(
+            Value::Map(vec![
+                (Value::Keyword(Keyword::from_namespace_and_name("person", "name")), Value::String("Joe".to_string())),
+                (Value::Keyword(Keyword::from_namespace_and_name("person", "parent")), Value::String("Bob".to_string())),
+                (Value::Keyword(Keyword::from_name("ssn")), Value::String("123".to_string())),
+                (Value::Symbol(Symbol::from_name("friends")), Value::Vector(vec![
+                    Value::String("sally".to_string()),
+                    Value::String("john".to_string()),
+                    Value::String("linda".to_string())
+                ])),
+                (Value::String("other".to_string()), Value::Map(vec![
+                    (Value::Keyword(Keyword::from_name("stuff")), Value::Keyword(Keyword::from_name("here")))
+                ]))
+            ]),
+            parse("\
+            {:person/name \"Joe\"\
+             :person/parent \"Bob\"\
+             :ssn \"123\"\
+             friends [\"sally\" \"john\" \"linda\"]\
+             \"other\" {:stuff :here}}").unwrap()
         )
     }
 }
