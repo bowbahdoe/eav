@@ -223,6 +223,7 @@ fn is_allowed_symbol_after_first_character(c: char) -> bool {
 }
 
 fn equal(v1: &Value, v2: &Value) -> bool {
+    println!("{:?} {:?}", v1, v2);
     match (v1, v2) {
         // nil, booleans, strings, characters, and symbols
         // are equal to values of the same type with the same edn representation
@@ -231,6 +232,7 @@ fn equal(v1: &Value, v2: &Value) -> bool {
         (Value::String(s1), Value::String(s2)) => s1 == s2,
         (Value::Character(c1), Value::Character(c2)) => c1 == c2,
         (Value::Symbol(s1), Value::Symbol(s2)) => s1 == s2,
+        (Value::Keyword(k1), Value::Keyword(k2)) => k1 == k2,
 
         // integers and floating point numbers should be considered equal to values only of the
         // same magnitude, type, and precision. Comingling numeric types and precision in
@@ -539,7 +541,14 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                         })
                     }
                 } else {
-                    Err(ParserError::UnexpectedEndOfInput)
+                    let namespace: String = characters_before_a_slash.into_iter().collect();
+                    let name: String = characters_after_a_slash.into_iter().collect();
+                    Ok(ParserSuccess {
+                        remaining_input: s,
+                        value: Value::Symbol(Symbol::from_namespace_and_name(
+                            &namespace, &name,
+                        )),
+                    })
                 }
             } else {
                 if characters_before_a_slash.is_empty() && !saw_slash {
@@ -1082,6 +1091,80 @@ mod tests {
              :ssn \"123\"\
              friends [\"sally\" \"john\" \"linda\"]\
              \"other\" {:stuff :here}}").unwrap()
+        )
+    }
+
+    #[test]
+    fn test_basic_keyword_and_symbol() {
+        assert!(
+            equal(
+                &parse("name").unwrap(),
+                &parse("name").unwrap()
+            )
+        );
+        assert!(
+            equal(
+                &parse("person/name").unwrap(),
+                &parse("person/name").unwrap()
+            )
+        );
+        assert!(
+            equal(
+                &parse(":name").unwrap(),
+                &parse(":name").unwrap()
+            )
+        );
+        assert!(
+            equal(
+                &parse(":person/name").unwrap(),
+                &parse(":person/name").unwrap()
+            )
+        );
+
+        // Had an issue with whitespace
+        assert!(
+            equal(
+                &parse("name ").unwrap(),
+                &parse("name ").unwrap()
+            )
+        );
+        assert!(
+            equal(
+                &parse("person/name ").unwrap(),
+                &parse("person/name ").unwrap()
+            )
+        );
+        assert!(
+            equal(
+                &parse(":name ").unwrap(),
+                &parse(":name ").unwrap()
+            )
+        );
+        assert!(
+            equal(
+                &parse(":person/name ").unwrap(),
+                &parse(":person/name ").unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn test_complex_equals() {
+        assert!(
+            equal(
+                &parse("\
+            {:person/parent \"Bob\"\
+             :person/name \"Joe\"\
+             :ssn \"123\"\
+             friends [\"sally\" \"john\" \"linda\"]\
+             \"other\" {:stuff :here}}").unwrap(),
+                &parse("\
+            {:person/name \"Joe\"\
+             :person/parent \"Bob\"\
+             :ssn \"123\"\
+             friends [\"sally\" \"john\" \"linda\"]\
+             \"other\" {:stuff :here}}").unwrap()
+            )
         )
     }
 }
