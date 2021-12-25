@@ -5,7 +5,6 @@ use internship;
 use internship::IStr;
 use itertools::Itertools;
 use num_bigint::{BigInt, ParseBigIntError};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::num::{ParseFloatError, ParseIntError};
@@ -245,7 +244,6 @@ fn is_allowed_symbol_character(c: char) -> bool {
 }
 
 fn equal(v1: &Value, v2: &Value) -> bool {
-    println!("{:?} {:?}", v1, v2);
     match (v1, v2) {
         // nil, booleans, strings, characters, and symbols
         // are equal to values of the same type with the same edn representation
@@ -988,7 +986,7 @@ impl Display for Value {
                 write!(f, "nil")?;
             },
             Value::String(s) => {
-                write!(f, "\"");
+                write!(f, "\"")?;
                 for c in s.chars() {
                     match c {
                         '\t' => write!(f, "{}","\\t")?,
@@ -1606,6 +1604,93 @@ mod tests {
 
             ),
             parse("( 1 2 3 \"abc\"\n;; so here is where we do some wacky stuff \n [a b/qq ; and then here\n c \n \n;; aaa\n{12 34.5 :a \n;;aaadeafaef\nb}])").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_round_trips() {
+        let v1 = Value::List(
+            vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3),
+                Value::String("abc".to_string()),
+                Value::Vector(
+                    vec![
+                        Value::Symbol(Symbol::from_name("a")),
+                        Value::Symbol(Symbol::from_namespace_and_name("b", "qq")),
+                        Value::Symbol(Symbol::from_name("c")),
+                        Value::Map(vec![
+                            (Value::Integer(12), Value::Float(34.5)),
+                            (Value::Keyword(Keyword::from_name("a")),
+                             Value::Symbol(Symbol::from_name("b")))
+                        ])
+                    ]
+                )
+            ]
+
+        );
+        let v2 = Value::Map(vec![
+            (
+                Value::Keyword(Keyword::from_namespace_and_name("person", "name")),
+                Value::String("Joe".to_string())
+            ),
+            (
+                Value::Keyword(Keyword::from_namespace_and_name("person", "parent")),
+                Value::String("Bob".to_string())
+            ),
+            (
+                Value::Keyword(Keyword::from_name("ssn")),
+                Value::String("123".to_string())
+            ),
+            (
+                Value::Symbol(Symbol::from_name("friends")),
+                Value::Vector(vec![
+                    Value::String("sally".to_string()),
+                    Value::String("john".to_string()),
+                    Value::String("linda".to_string())
+                ])
+            ),
+            (
+                Value::String("other".to_string()),
+                Value::Map(vec![(
+                    Value::Keyword(Keyword::from_name("stuff")),
+                    Value::Keyword(Keyword::from_name("here"))
+                )])
+            ),
+            (Value::Inst(DateTime::parse_from_rfc3339("1985-04-12T23:20:50.52Z").unwrap()),
+             Value::Set(vec![
+                 Value::TaggedElement(
+                     Symbol::from_namespace_and_name("person", "ssn"),
+                     Box::new(Value::String("123".to_string()))
+                 ),
+                 Value::Nil,
+                 Value::Boolean(false),
+                 Value::List(vec![
+                     Value::Integer(1),
+                     Value::Float(2.0),
+                     Value::BigDec(BigDecimal::from((BigInt::from(4), 9))),
+                     Value::BigInt(BigInt::from(4))
+                 ])
+             ]))
+        ]);
+        assert_eq!(
+            serialize(&v1),
+            serialize(&parse(&serialize(&v1)).unwrap())
+        );
+        assert_eq!(
+            serialize(&v2),
+            serialize(&parse(&serialize(&v2)).unwrap())
+        );
+
+        println!("{}", serialize(&v2));
+        assert_eq!(
+            parse(&serialize(&v1)).unwrap(),
+            parse(&serialize(&parse(&serialize(&v1)).unwrap())).unwrap()
+        );
+        assert_eq!(
+            parse(&serialize(&v2)).unwrap(),
+            parse(&serialize(&parse(&serialize(&v2)).unwrap())).unwrap()
         );
     }
 }
