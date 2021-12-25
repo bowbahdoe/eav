@@ -324,9 +324,9 @@ fn parse_helper(
     mut parser_state: ParserState,
 ) -> Result<ParserSuccess, ParserError> {
     'parsing: loop {
-        /* println!("{:?}", parser_state);
+         println!("{:?}", parser_state);
         println!("{:?}", s);
-        println!(); */
+        println!();
         // Strip out comments
         match parser_state {
             ParserState::ParsingString { .. } => {}
@@ -1324,23 +1324,23 @@ mod tests {
     #[test]
     fn test_parsing_keyword_errs() {
         assert_eq!(
-            Err(ParserError::CannotHaveSlashAtBeginningOfSymbol),
+            Err(ParserError::CannotHaveSlashAtBeginningOfKeyword),
             parse(":/abc")
         );
         assert_eq!(
-            Err(ParserError::CannotHaveSlashAtEndOfSymbol),
+            Err(ParserError::CannotHaveSlashAtEndOfKeyword),
             parse(":abc/")
         );
         assert_eq!(
-            Err(ParserError::CannotHaveSlashAtEndOfSymbol),
+            Err(ParserError::CannotHaveSlashAtEndOfKeyword),
             parse(":abc/ ")
         );
         assert_eq!(
-            Err(ParserError::CannotHaveSlashAtEndOfSymbol),
+            Err(ParserError::CannotHaveSlashAtEndOfKeyword),
             parse(":abc/ []")
         );
         assert_eq!(
-            Err(ParserError::CannotHaveMoreThanOneSlashInSymbol),
+            Err(ParserError::CannotHaveMoreThanOneSlashInKeyword),
             parse(":a/b/c")
         );
         assert_eq!(Err(ParserError::InvalidKeyword), parse("::namespaced"));

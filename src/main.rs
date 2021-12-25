@@ -32,5 +32,21 @@ fn main() {
         edn::emit(
             &edn::parse("[{:person/name \"A\nnna\" :person/email \"anna@example.com\"}]").unwrap()
         )
+    );
+
+    println!(
+        "{}",
+        edn::parse(
+            "{:mvn/repos {\"jcenter\" {:url       \"https://jcenter.bintray.com\"
+            :snapshots false
+                :releases  {:checksum :fail :update :always}}
+\"maven\"   {:url      \"https://repo1.maven.org/maven2/\"
+:releases {:checksum :fail :update :always}}
+\"clojars\" {:url      \"https://repo.clojars.org\"
+:releases {:checksum :fail :update :always}}}
+
+:deps      {org.clojure/clojure                             {:mvn/version \"1.10.1\"}
+org.clojure/clojurescript                       {:mvn/version \"1.10.844\"}}}"
+        ).unwrap()
     )
 }
