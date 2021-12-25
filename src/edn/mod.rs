@@ -171,6 +171,15 @@ pub enum ParserError {
     #[error("Cannot have more than one slash in a symbol")]
     CannotHaveMoreThanOneSlashInSymbol,
 
+    #[error("Cannot have slash at the beginning of symbol")]
+    CannotHaveSlashAtBeginningOfKeyword,
+
+    #[error("Cannot have slash at the end of symbol")]
+    CannotHaveSlashAtEndOfKeyword,
+
+    #[error("Cannot have more than one slash in a symbol")]
+    CannotHaveMoreThanOneSlashInKeyword,
+
     #[error("Only 0 can start with 0")]
     OnlyZeroCanStartWithZero,
 
@@ -291,9 +300,7 @@ fn equal(v1: &Value, v2: &Value) -> bool {
         // maps are equal if they have the same number of entries,
         // and for every key/value entry in one map an equal key is present
         // and mapped to an equal value in the other.
-        (Value::Map(entries1), Value::Map(entries2)) => {
-            entries1 == entries2
-        }
+        (Value::Map(entries1), Value::Map(entries2)) => entries1 == entries2,
 
         // tagged elements must define their own equality semantics.
         // #uuid elements are equal if their canonic representations are equal.
@@ -366,7 +373,18 @@ fn parse_helper(
                     let ParserSuccess {
                         remaining_input,
                         value,
-                    } = parse_helper(&s[1..], ParserState::Begin)?;
+                    } = parse_helper(&s[1..], ParserState::Begin).map_err(|err| match err {
+                        ParserError::CannotHaveSlashAtBeginningOfSymbol => {
+                            ParserError::CannotHaveSlashAtBeginningOfKeyword
+                        }
+                        ParserError::CannotHaveSlashAtEndOfSymbol => {
+                            ParserError::CannotHaveSlashAtEndOfKeyword
+                        }
+                        ParserError::CannotHaveMoreThanOneSlashInSymbol => {
+                            ParserError::CannotHaveMoreThanOneSlashInKeyword
+                        }
+                        err => err,
+                    })?;
                     if let Value::Symbol(symbol) = value {
                         return Ok(ParserSuccess {
                             remaining_input,
@@ -895,8 +913,8 @@ fn replace_numeric_types(value: &mut Value) -> Result<(), ParserError> {
             let mut new_map = BTreeMap::new();
             for (k, v) in entries.into_iter() {
                 let mut k2 = k.clone();
-                replace_numeric_types(&mut k2);
-                replace_numeric_types(v);
+                replace_numeric_types(&mut k2)?;
+                replace_numeric_types(v)?;
                 new_map.insert(k2, v.clone());
             }
             *value = Value::Map(new_map);
