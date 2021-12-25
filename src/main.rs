@@ -29,6 +29,8 @@ fn main() {
 
     println!(
         "{}",
-        edn::serialize(&edn::parse("[{:person/name \"A\nnna\" :person/email \"anna@example.com\"}]").unwrap())
+        edn::serialize(
+            &edn::parse("[{:person/name \"A\nnna\" :person/email \"anna@example.com\"}]").unwrap()
+        )
     )
 }

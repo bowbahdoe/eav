@@ -984,51 +984,51 @@ impl Display for Value {
         match self {
             Value::Nil => {
                 write!(f, "nil")?;
-            },
+            }
             Value::String(s) => {
                 write!(f, "\"")?;
                 for c in s.chars() {
                     match c {
-                        '\t' => write!(f, "{}","\\t")?,
-                        '\r' => write!(f, "{}","\\r")?,
-                        '\n' => write!(f, "{}","\\n")?,
+                        '\t' => write!(f, "{}", "\\t")?,
+                        '\r' => write!(f, "{}", "\\r")?,
+                        '\n' => write!(f, "{}", "\\n")?,
 
-                        '\\' => write!(f, "{}","\\\\")?,
-                        '\"' => write!(f, "{}","\\\"")?,
-                        'b' => write!(f, "{}","\\b")?,
-                        'f' => write!(f, "{}","\\f")?,
-                        _ => write!(f, "{}", c)?
+                        '\\' => write!(f, "{}", "\\\\")?,
+                        '\"' => write!(f, "{}", "\\\"")?,
+                        'b' => write!(f, "{}", "\\b")?,
+                        'f' => write!(f, "{}", "\\f")?,
+                        _ => write!(f, "{}", c)?,
                     };
                 }
                 write!(f, "\"")?;
-            },
+            }
             Value::Character(c) => {
                 match c {
                     '\n' => write!(f, "\\newline")?,
                     '\r' => write!(f, "\\return")?,
                     ' ' => write!(f, "\\space")?,
                     '\t' => write!(f, "\\tab")?,
-                    _ => write!(f, "{}", c)?
+                    _ => write!(f, "{}", c)?,
                 };
-            },
+            }
             Value::Symbol(symbol) => {
                 write!(f, "{}", symbol)?;
-            },
+            }
             Value::Keyword(keyword) => {
                 write!(f, "{}", keyword)?;
-            },
+            }
             Value::Integer(i) => {
                 write!(f, "{}", i)?;
-            },
+            }
             Value::Float(fl) => {
                 write!(f, "{}", fl)?;
-            },
+            }
             Value::BigInt(bi) => {
                 write!(f, "{}N", bi)?;
-            },
+            }
             Value::BigDec(bd) => {
                 write!(f, "{}M", bd)?;
-            },
+            }
             Value::List(elements) => {
                 write!(f, "(")?;
                 let mut i = 0;
@@ -1080,16 +1080,16 @@ impl Display for Value {
             }
             Value::Boolean(b) => {
                 write!(f, "{}", b)?;
-            },
+            }
             Value::Inst(inst) => {
                 write!(f, "#inst \"{}\"", inst.to_rfc3339())?;
-            },
+            }
             Value::Uuid(uuid) => {
                 write!(f, "#uuid \"{}\"", uuid)?;
-            },
+            }
             Value::TaggedElement(tag, value) => {
                 write!(f, "#{} {}", tag, value)?;
-            },
+            }
         }
         Ok(())
     }
@@ -1609,79 +1609,72 @@ mod tests {
 
     #[test]
     fn test_round_trips() {
-        let v1 = Value::List(
-            vec![
-                Value::Integer(1),
-                Value::Integer(2),
-                Value::Integer(3),
-                Value::String("abc".to_string()),
-                Value::Vector(
-                    vec![
-                        Value::Symbol(Symbol::from_name("a")),
-                        Value::Symbol(Symbol::from_namespace_and_name("b", "qq")),
-                        Value::Symbol(Symbol::from_name("c")),
-                        Value::Map(vec![
-                            (Value::Integer(12), Value::Float(34.5)),
-                            (Value::Keyword(Keyword::from_name("a")),
-                             Value::Symbol(Symbol::from_name("b")))
-                        ])
-                    ]
-                )
-            ]
-
-        );
+        let v1 = Value::List(vec![
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
+            Value::String("abc".to_string()),
+            Value::Vector(vec![
+                Value::Symbol(Symbol::from_name("a")),
+                Value::Symbol(Symbol::from_namespace_and_name("b", "qq")),
+                Value::Symbol(Symbol::from_name("c")),
+                Value::Map(vec![
+                    (Value::Integer(12), Value::Float(34.5)),
+                    (
+                        Value::Keyword(Keyword::from_name("a")),
+                        Value::Symbol(Symbol::from_name("b")),
+                    ),
+                ]),
+            ]),
+        ]);
         let v2 = Value::Map(vec![
             (
                 Value::Keyword(Keyword::from_namespace_and_name("person", "name")),
-                Value::String("Joe".to_string())
+                Value::String("Joe".to_string()),
             ),
             (
                 Value::Keyword(Keyword::from_namespace_and_name("person", "parent")),
-                Value::String("Bob".to_string())
+                Value::String("Bob".to_string()),
             ),
             (
                 Value::Keyword(Keyword::from_name("ssn")),
-                Value::String("123".to_string())
+                Value::String("123".to_string()),
             ),
             (
                 Value::Symbol(Symbol::from_name("friends")),
                 Value::Vector(vec![
                     Value::String("sally".to_string()),
                     Value::String("john".to_string()),
-                    Value::String("linda".to_string())
-                ])
+                    Value::String("linda".to_string()),
+                ]),
             ),
             (
                 Value::String("other".to_string()),
                 Value::Map(vec![(
                     Value::Keyword(Keyword::from_name("stuff")),
-                    Value::Keyword(Keyword::from_name("here"))
-                )])
+                    Value::Keyword(Keyword::from_name("here")),
+                )]),
             ),
-            (Value::Inst(DateTime::parse_from_rfc3339("1985-04-12T23:20:50.52Z").unwrap()),
-             Value::Set(vec![
-                 Value::TaggedElement(
-                     Symbol::from_namespace_and_name("person", "ssn"),
-                     Box::new(Value::String("123".to_string()))
-                 ),
-                 Value::Nil,
-                 Value::Boolean(false),
-                 Value::List(vec![
-                     Value::Integer(1),
-                     Value::Float(2.0),
-                     Value::BigDec(BigDecimal::from((BigInt::from(4), 9))),
-                     Value::BigInt(BigInt::from(4))
-                 ])
-             ]))
+            (
+                Value::Inst(DateTime::parse_from_rfc3339("1985-04-12T23:20:50.52Z").unwrap()),
+                Value::Set(vec![
+                    Value::TaggedElement(
+                        Symbol::from_namespace_and_name("person", "ssn"),
+                        Box::new(Value::String("123".to_string())),
+                    ),
+                    Value::Nil,
+                    Value::Boolean(false),
+                    Value::List(vec![
+                        Value::Integer(1),
+                        Value::Float(2.0),
+                        Value::BigDec(BigDecimal::from((BigInt::from(4), 9))),
+                        Value::BigInt(BigInt::from(4)),
+                    ]),
+                ]),
+            ),
         ]);
-        assert_eq!(
-            serialize(&v1),
-            serialize(&parse(&serialize(&v1)).unwrap())
-        );
-        assert_eq!(
-            serialize(&v2),
-            serialize(&parse(&serialize(&v2)).unwrap())
-        );
+        assert_eq!(serialize(&v1), serialize(&parse(&serialize(&v1)).unwrap()));
+        assert_eq!(serialize(&v2), serialize(&parse(&serialize(&v2)).unwrap()));
 
         println!("{}", serialize(&v2));
         assert_eq!(
@@ -1692,5 +1685,16 @@ mod tests {
             parse(&serialize(&v2)).unwrap(),
             parse(&serialize(&parse(&serialize(&v2)).unwrap())).unwrap()
         );
+    }
+
+    #[test]
+    fn test_big_vector() {
+        let mut vals: Vec<Value> = vec![];
+        for i in 0..100000 {
+            vals.push(Value::Integer(i))
+        }
+        let ser = serialize(&Value::Vector(vals));
+        println!("{}", ser);
+        parse(&ser);
     }
 }
