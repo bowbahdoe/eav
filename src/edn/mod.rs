@@ -1478,7 +1478,8 @@ mod tests {
                             Value::Symbol(Symbol::from_name("c")),
                             Value::Map(vec![
                                 (Value::Integer(12), Value::Float(34.5)),
-                                (Value::Keyword(Keyword::from_name("a")), Value::Symbol(Symbol::from_name("b")))
+                                (Value::Keyword(Keyword::from_name("a")),
+                                 Value::Symbol(Symbol::from_name("b")))
                             ])
                         ]
                     )
