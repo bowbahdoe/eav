@@ -292,23 +292,7 @@ fn equal(v1: &Value, v2: &Value) -> bool {
         // and for every key/value entry in one map an equal key is present
         // and mapped to an equal value in the other.
         (Value::Map(entries1), Value::Map(entries2)) => {
-            if entries1.len() != entries2.len() {
-                false
-            } else {
-                for (v1, k1) in entries1 {
-                    let mut found = false;
-                    for (v2, k2) in entries2 {
-                        if equal(v1, v2) && equal(k1, k2) {
-                            found = true;
-                        }
-                    }
-                    if !found {
-                        return false;
-                    }
-                }
-
-                return true;
-            }
+            entries1 == entries2
         }
 
         // tagged elements must define their own equality semantics.
