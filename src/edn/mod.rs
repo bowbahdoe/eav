@@ -1,16 +1,17 @@
-use std::collections::{BTreeMap, BTreeSet};
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use chrono::FixedOffset;
 use internship;
 use internship::IStr;
 use itertools::Itertools;
 use num_bigint::{BigInt, ParseBigIntError};
+use ordered_float::OrderedFloat;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use std::iter::FromIterator;
 use std::num::{ParseFloatError, ParseIntError};
 use thiserror::Error;
 use uuid::Uuid;
-use ordered_float::OrderedFloat;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Keyword {
@@ -285,9 +286,7 @@ fn equal(v1: &Value, v2: &Value) -> bool {
 
         // sets are equal if they have the same count of elements and,
         // for every element in one set, an equal element is in the other.
-        (Value::Set(vals1), Value::Set(vals2)) => {
-            vals1 == vals2
-        }
+        (Value::Set(vals1), Value::Set(vals2)) => vals1 == vals2,
 
         // maps are equal if they have the same number of entries,
         // and for every key/value entry in one map an equal key is present
@@ -333,11 +332,10 @@ fn parse_helper(
     mut s: &[char],
     mut parser_state: ParserState,
 ) -> Result<ParserSuccess, ParserError> {
-    /*  */
-
-
     'parsing: loop {
-
+        /* println!("{:?}", parser_state);
+        println!("{:?}", s);
+        println!(); */
         // Strip out comments
         match parser_state {
             ParserState::ParsingString { .. } => {}
@@ -413,7 +411,9 @@ fn parse_helper(
                 }
             }
 
-            ParserState::ParsingList { ref mut values_so_far } => {
+            ParserState::ParsingList {
+                ref mut values_so_far,
+            } => {
                 if s.is_empty() {
                     return Err(ParserError::UnexpectedEndOfInput);
                 } else if is_whitespace(s[0]) {
@@ -434,7 +434,9 @@ fn parse_helper(
             }
 
             // Almost total duplicate of ParsingList
-            ParserState::ParsingVector { ref mut values_so_far } => {
+            ParserState::ParsingVector {
+                ref mut values_so_far,
+            } => {
                 if s.is_empty() {
                     return Err(ParserError::UnexpectedEndOfInput);
                 } else if is_whitespace(s[0]) {
@@ -454,7 +456,9 @@ fn parse_helper(
                 }
             }
 
-            ParserState::ParsingMap { ref mut values_so_far } => {
+            ParserState::ParsingMap {
+                ref mut values_so_far,
+            } => {
                 if s.is_empty() {
                     return Err(ParserError::UnexpectedEndOfInput);
                 } else if is_whitespace(s[0]) {
@@ -464,7 +468,7 @@ fn parse_helper(
                         return Err(ParserError::OddNumberOfMapElements);
                     } else {
                         // I'm confident there has to be a better way to do this
-                        let entries: BTreeMap<Value, Value> = values_so_far
+                        let entries: Vec<(Value, Value)> = values_so_far
                             .into_iter()
                             .map(|v| v.clone())
                             .batching(|it| match it.next() {
@@ -483,7 +487,7 @@ fn parse_helper(
                             }
                             seen.insert(k);
                         }
-                        let value = Value::Map(entries);
+                        let value = Value::Map(BTreeMap::from_iter(entries));
 
                         return Ok(ParserSuccess {
                             remaining_input: &s[1..],
@@ -500,7 +504,9 @@ fn parse_helper(
                 }
             }
 
-            ParserState::ParsingSet { ref mut values_so_far } => {
+            ParserState::ParsingSet {
+                ref mut values_so_far,
+            } => {
                 if s.is_empty() {
                     return Err(ParserError::UnexpectedEndOfInput);
                 } else if is_whitespace(s[0]) {
@@ -539,18 +545,23 @@ fn parse_helper(
                         if *saw_slash {
                             return Err(ParserError::UnexpectedEndOfInput);
                         } else {
-                            let name: String = characters_before_a_slash.into_iter().map(|c| *c).collect();
+                            let name: String =
+                                characters_before_a_slash.into_iter().map(|c| *c).collect();
                             return Ok(ParserSuccess {
                                 remaining_input: s,
                                 value: Value::Symbol(Symbol::from_name(&name)),
                             });
                         }
                     } else {
-                        let namespace: String = characters_before_a_slash.into_iter().map(|c| *c).collect();
-                        let name: String = characters_after_a_slash.into_iter().map(|c| *c).collect();
+                        let namespace: String =
+                            characters_before_a_slash.into_iter().map(|c| *c).collect();
+                        let name: String =
+                            characters_after_a_slash.into_iter().map(|c| *c).collect();
                         return Ok(ParserSuccess {
                             remaining_input: s,
-                            value: Value::Symbol(Symbol::from_namespace_and_name(&namespace, &name)),
+                            value: Value::Symbol(Symbol::from_namespace_and_name(
+                                &namespace, &name,
+                            )),
                         });
                     }
                 } else {
@@ -582,7 +593,8 @@ fn parse_helper(
                                 *saw_slash = true;
                             }
                         } else {
-                            let name: String = characters_before_a_slash.into_iter().map(|c| *c).collect();
+                            let name: String =
+                                characters_before_a_slash.into_iter().map(|c| *c).collect();
                             return Ok(ParserSuccess {
                                 remaining_input: s,
                                 value: Value::Symbol(Symbol::from_name(&name)),
@@ -595,8 +607,10 @@ fn parse_helper(
                         } else if s[0] == '/' {
                             return Err(ParserError::CannotHaveMoreThanOneSlashInSymbol);
                         } else {
-                            let namespace: String = characters_before_a_slash.into_iter().map(|c| *c).collect();
-                            let name: String = characters_after_a_slash.into_iter().map(|c| *c).collect();
+                            let namespace: String =
+                                characters_before_a_slash.into_iter().map(|c| *c).collect();
+                            let name: String =
+                                characters_after_a_slash.into_iter().map(|c| *c).collect();
                             return Ok(ParserSuccess {
                                 remaining_input: s,
                                 value: Value::Symbol(Symbol::from_namespace_and_name(
@@ -696,9 +710,10 @@ fn parse_helper(
                             // Handle builtin #uuid
                             else if symbol.namespace == None && symbol.name == "uuid" {
                                 if let Value::String(uuid_str) = next_success.value {
-                                    let uuid = Uuid::parse_str(&uuid_str).map_err(|parse_error| {
-                                        ParserError::InvalidUuid(Some(parse_error))
-                                    })?;
+                                    let uuid =
+                                        Uuid::parse_str(&uuid_str).map_err(|parse_error| {
+                                            ParserError::InvalidUuid(Some(parse_error))
+                                        })?;
                                     return Ok(ParserSuccess {
                                         remaining_input: next_success.remaining_input,
                                         value: Value::Uuid(uuid),
@@ -711,7 +726,10 @@ fn parse_helper(
                             else {
                                 return Ok(ParserSuccess {
                                     remaining_input: next_success.remaining_input,
-                                    value: Value::TaggedElement(symbol, Box::new(next_success.value)),
+                                    value: Value::TaggedElement(
+                                        symbol,
+                                        Box::new(next_success.value),
+                                    ),
                                 });
                             }
                         }
@@ -731,11 +749,9 @@ fn parse_helper(
                         if symbol.name.len() == 1 {
                             return Ok(ParserSuccess {
                                 remaining_input,
-                                value: Value::Character(
-                                    symbol.name.chars().next().expect(
-                                        "Asserted that this string has at least one character.",
-                                    ),
-                                ),
+                                value: Value::Character(symbol.name.chars().next().expect(
+                                    "Asserted that this string has at least one character.",
+                                )),
                             });
                         } else {
                             return match &symbol.name.as_str() {
@@ -767,7 +783,6 @@ fn parse_helper(
             }
         }
     }
-
 }
 
 /// Crawls the tree mutably to avoid pointless allocations
@@ -846,10 +861,10 @@ fn replace_numeric_types(value: &mut Value) -> Result<(), ParserError> {
                                     .map_err(|err| ParserError::BadBigDec(err))?,
                             );
                         } else if name.contains(".") || name.contains("e") || name.contains("E") {
-                            *value = Value::Float(
-                                OrderedFloat(str::parse::<f64>(&symbol.name)
-                                    .map_err(|err| ParserError::BadFloat(err))?),
-                            );
+                            *value = Value::Float(OrderedFloat(
+                                str::parse::<f64>(&symbol.name)
+                                    .map_err(|err| ParserError::BadFloat(err))?,
+                            ));
                         } else if name != "0" && (name.starts_with("0"))
                             || (name != "+0"
                                 && (name.len() > 1
@@ -1063,10 +1078,10 @@ pub fn emit(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::iter::FromIterator;
-    use std::vec;
     use super::*;
     use chrono::DateTime;
+    use std::iter::FromIterator;
+    use std::vec;
 
     #[test]
     fn test_display_symbol() {
@@ -1124,7 +1139,10 @@ mod tests {
 
     #[test]
     fn test_parsing_empty_map() {
-        assert_eq!(Value::Map(BTreeMap::from_iter(vec![])), parse("{}").unwrap())
+        assert_eq!(
+            Value::Map(BTreeMap::from_iter(vec![])),
+            parse("{}").unwrap()
+        )
     }
 
     #[test]
@@ -1139,7 +1157,10 @@ mod tests {
     #[test]
     fn test_parsing_even_map() {
         assert_eq!(
-            Value::Map(BTreeMap::from_iter(vec![(Value::List(vec![]), Value::List(vec![]))])),
+            Value::Map(BTreeMap::from_iter(vec![(
+                Value::List(vec![]),
+                Value::List(vec![])
+            )])),
             parse("{() ()}").unwrap()
         );
         assert_eq!(
@@ -1154,7 +1175,10 @@ mod tests {
     #[test]
     fn test_parsing_duplicate_map_keys() {
         assert_eq!(
-            Value::Map(BTreeMap::from_iter(vec![(Value::List(vec![]), Value::List(vec![]))])),
+            Value::Map(BTreeMap::from_iter(vec![(
+                Value::List(vec![]),
+                Value::List(vec![])
+            )])),
             parse("{() ()}").unwrap()
         );
         assert_eq!(
@@ -1323,11 +1347,14 @@ mod tests {
     #[test]
     fn test_parse_set() {
         assert_eq!(
-            Value::Set(BTreeSet::from_iter(vec![
-                Value::Keyword(Keyword::from_name("abc")),
-                Value::Keyword(Keyword::from_name("def")),
-                Value::Keyword(Keyword::from_namespace_and_name("ghi", "jkl"))
-            ].into_iter())),
+            Value::Set(BTreeSet::from_iter(
+                vec![
+                    Value::Keyword(Keyword::from_name("abc")),
+                    Value::Keyword(Keyword::from_name("def")),
+                    Value::Keyword(Keyword::from_namespace_and_name("ghi", "jkl"))
+                ]
+                .into_iter()
+            )),
             parse("#{:abc :def :ghi/jkl }").unwrap()
         );
 
@@ -1342,16 +1369,22 @@ mod tests {
     #[test]
     fn test_set_equals() {
         assert!(equal(
-            &Value::Set(BTreeSet::from_iter(vec![
-                Value::Keyword(Keyword::from_name("def")),
-                Value::Keyword(Keyword::from_namespace_and_name("ghi", "jkl")),
-                Value::Keyword(Keyword::from_name("abc"))
-            ].into_iter())),
-            &Value::Set(BTreeSet::from_iter(vec![
-                Value::Keyword(Keyword::from_name("abc")),
-                Value::Keyword(Keyword::from_name("def")),
-                Value::Keyword(Keyword::from_namespace_and_name("ghi", "jkl"))
-            ].into_iter()))
+            &Value::Set(BTreeSet::from_iter(
+                vec![
+                    Value::Keyword(Keyword::from_name("def")),
+                    Value::Keyword(Keyword::from_namespace_and_name("ghi", "jkl")),
+                    Value::Keyword(Keyword::from_name("abc"))
+                ]
+                .into_iter()
+            )),
+            &Value::Set(BTreeSet::from_iter(
+                vec![
+                    Value::Keyword(Keyword::from_name("abc")),
+                    Value::Keyword(Keyword::from_name("def")),
+                    Value::Keyword(Keyword::from_namespace_and_name("ghi", "jkl"))
+                ]
+                .into_iter()
+            ))
         ))
     }
     #[test]
@@ -1621,20 +1654,23 @@ mod tests {
             ),
             (
                 Value::Inst(DateTime::parse_from_rfc3339("1985-04-12T23:20:50.52Z").unwrap()),
-                Value::Set(BTreeSet::from_iter(vec![
-                    Value::TaggedElement(
-                        Symbol::from_namespace_and_name("person", "ssn"),
-                        Box::new(Value::String("123".to_string())),
-                    ),
-                    Value::Nil,
-                    Value::Boolean(false),
-                    Value::List(vec![
-                        Value::Integer(1),
-                        Value::Float(OrderedFloat(2.0)),
-                        Value::BigDec(BigDecimal::from((BigInt::from(4), 9))),
-                        Value::BigInt(BigInt::from(4)),
-                    ]),
-                ].into_iter())),
+                Value::Set(BTreeSet::from_iter(
+                    vec![
+                        Value::TaggedElement(
+                            Symbol::from_namespace_and_name("person", "ssn"),
+                            Box::new(Value::String("123".to_string())),
+                        ),
+                        Value::Nil,
+                        Value::Boolean(false),
+                        Value::List(vec![
+                            Value::Integer(1),
+                            Value::Float(OrderedFloat(2.0)),
+                            Value::BigDec(BigDecimal::from((BigInt::from(4), 9))),
+                            Value::BigInt(BigInt::from(4)),
+                        ]),
+                    ]
+                    .into_iter(),
+                )),
             ),
         ]));
         assert_eq!(emit(&v1), emit(&parse(&emit(&v1)).unwrap()));
@@ -1686,7 +1722,10 @@ mod tests {
     fn test_big_map() {
         let mut vals: Vec<(Value, Value)> = vec![];
         for i in 0..10000 {
-            vals.push((Value::Keyword(Keyword::from_name(&i.to_string())), Value::Integer(i)))
+            vals.push((
+                Value::Keyword(Keyword::from_name(&i.to_string())),
+                Value::Integer(i),
+            ))
         }
         let ser = emit(&Value::Map(BTreeMap::from_iter(vals.clone())));
         assert_eq!(parse(&ser).unwrap(), Value::Map(BTreeMap::from_iter(vals)));
