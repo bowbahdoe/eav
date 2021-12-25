@@ -340,10 +340,25 @@ fn equal(v1: &Value, v2: &Value) -> bool {
 
 /// Likely *very* suboptimal parsing. Focus for now should be getting actually correct
 /// results, since there is no good edn library for rust.
-fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSuccess, ParserError> {
+fn parse_helper(
+    mut s: &[char],
+    mut parser_state: ParserState,
+) -> Result<ParserSuccess, ParserError> {
     println!("{:?}", parser_state);
     println!("{:?}", s);
     println!();
+
+    // Strip out comments
+    match parser_state {
+        ParserState::ParsingString { .. } => {}
+        _ => {
+            if !s.is_empty() && s[0] == ';' {
+                while !s.is_empty() && s[0] != '\n' {
+                    s = &s[1..];
+                }
+            }
+        }
+    };
     match parser_state {
         ParserState::Begin => {
             if s.len() == 0 {
@@ -1445,5 +1460,32 @@ mod tests {
     #[test]
     fn test_parse_bigdec() {
         assert_eq!(Value::BigDec(BigDecimal::from(123)), parse("123M").unwrap());
+    }
+
+    #[test]
+    fn test_with_comments() {
+        assert_eq!(
+            Value::List(
+                vec![
+                    Value::Integer(1),
+                    Value::Integer(2),
+                    Value::Integer(3),
+                    Value::String("abc".to_string()),
+                    Value::Vector(
+                        vec![
+                            Value::Symbol(Symbol::from_name("a")),
+                            Value::Symbol(Symbol::from_namespace_and_name("b", "qq")),
+                            Value::Symbol(Symbol::from_name("c")),
+                            Value::Map(vec![
+                                (Value::Integer(12), Value::Float(34.5)),
+                                (Value::Keyword(Keyword::from_name("a")), Value::Symbol(Symbol::from_name("b")))
+                            ])
+                        ]
+                    )
+                ]
+
+            ),
+            parse("( 1 2 3 \"abc\"\n;; so here is where we do some wacky stuff \n [a b/qq ; and then here\n c \n \n;; aaa\n{12 34.5 :a \n;;aaadeafaef\nb}])").unwrap()
+        );
     }
 }
