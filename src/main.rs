@@ -26,4 +26,9 @@ fn main() {
 
     println!("{}", Keyword::from_namespace_and_name("user", "age"));
     println!("{:?}", datom);
+
+    println!(
+        "{}",
+        edn::serialize(&edn::parse("[{:person/name \"A\nnna\" :person/email \"anna@example.com\"}]").unwrap())
+    )
 }

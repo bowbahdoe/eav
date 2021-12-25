@@ -112,7 +112,7 @@ pub enum Value {
 }
 
 #[derive(Debug, Error, PartialEq)]
-enum ParserError {
+pub enum ParserError {
     #[error("The input was entirely blank")]
     EmptyInput,
 
@@ -344,9 +344,9 @@ fn parse_helper(
     mut s: &[char],
     mut parser_state: ParserState,
 ) -> Result<ParserSuccess, ParserError> {
-    println!("{:?}", parser_state);
+    /* println!("{:?}", parser_state);
     println!("{:?}", s);
-    println!();
+    println!(); */
 
     // Strip out comments
     match parser_state {
@@ -961,9 +961,8 @@ fn replace_numeric_types(value: &mut Value) -> Result<(), ParserError> {
 }
 
 // Parse EDN from the given input string
-fn parse(s: &str) -> Result<Value, ParserError> {
+pub fn parse(s: &str) -> Result<Value, ParserError> {
     let chars: Vec<char> = s.chars().collect();
-    // TODO: pre-strip comments
     let ParserSuccess {
         remaining_input,
         mut value,
@@ -980,6 +979,126 @@ fn parse(s: &str) -> Result<Value, ParserError> {
     replace_nil_false_true(&mut value);
     replace_numeric_types(&mut value)?;
     Ok(value)
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Nil => {
+                write!(f, "nil")?;
+            },
+            Value::String(s) => {
+                write!(f, "\"");
+                for c in s.chars() {
+                    match c {
+                        '\t' => write!(f, "{}","\\t")?,
+                        '\r' => write!(f, "{}","\\r")?,
+                        '\n' => write!(f, "{}","\\n")?,
+
+                        '\\' => write!(f, "{}","\\\\")?,
+                        '\"' => write!(f, "{}","\\\"")?,
+                        'b' => write!(f, "{}","\\b")?,
+                        'f' => write!(f, "{}","\\f")?,
+                        _ => write!(f, "{}", c)?
+                    };
+                }
+                write!(f, "\"")?;
+            },
+            Value::Character(c) => {
+                match c {
+                    '\n' => write!(f, "\\newline")?,
+                    '\r' => write!(f, "\\return")?,
+                    ' ' => write!(f, "\\space")?,
+                    '\t' => write!(f, "\\tab")?,
+                    _ => write!(f, "{}", c)?
+                };
+            },
+            Value::Symbol(symbol) => {
+                write!(f, "{}", symbol)?;
+            },
+            Value::Keyword(keyword) => {
+                write!(f, "{}", keyword)?;
+            },
+            Value::Integer(i) => {
+                write!(f, "{}", i)?;
+            },
+            Value::Float(fl) => {
+                write!(f, "{}", fl)?;
+            },
+            Value::BigInt(bi) => {
+                write!(f, "{}N", bi)?;
+            },
+            Value::BigDec(bd) => {
+                write!(f, "{}M", bd)?;
+            },
+            Value::List(elements) => {
+                write!(f, "(")?;
+                let mut i = 0;
+                while i < elements.len() {
+                    write!(f, "{}", elements[i])?;
+                    if i != elements.len() - 1 {
+                        write!(f, " ")?;
+                    }
+                    i += 1;
+                }
+                write!(f, ")")?;
+            }
+            Value::Vector(elements) => {
+                write!(f, "[")?;
+                let mut i = 0;
+                while i < elements.len() {
+                    write!(f, "{}", elements[i])?;
+                    if i != elements.len() - 1 {
+                        write!(f, " ")?;
+                    }
+                    i += 1;
+                }
+                write!(f, "]")?;
+            }
+            Value::Map(entries) => {
+                write!(f, "{{")?;
+                let mut i = 0;
+                while i < entries.len() {
+                    let (k, v) = &entries[i];
+                    write!(f, "{} {}", k, v)?;
+                    if i != entries.len() - 1 {
+                        write!(f, " ")?;
+                    }
+                    i += 1;
+                }
+                write!(f, "}}")?;
+            }
+            Value::Set(elements) => {
+                write!(f, "#{{")?;
+                let mut i = 0;
+                while i < elements.len() {
+                    write!(f, "{}", elements[i])?;
+                    if i != elements.len() - 1 {
+                        write!(f, " ")?;
+                    }
+                    i += 1;
+                }
+                write!(f, "}}")?;
+            }
+            Value::Boolean(b) => {
+                write!(f, "{}", b)?;
+            },
+            Value::Inst(inst) => {
+                write!(f, "#inst \"{}\"", inst.to_rfc3339())?;
+            },
+            Value::Uuid(uuid) => {
+                write!(f, "#uuid \"{}\"", uuid)?;
+            },
+            Value::TaggedElement(tag, value) => {
+                write!(f, "#{} {}", tag, value)?;
+            },
+        }
+        Ok(())
+    }
+}
+
+pub fn serialize(value: &Value) -> String {
+    format!("{}", value)
 }
 
 #[cfg(test)]
