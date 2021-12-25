@@ -57,6 +57,7 @@ dependencies = [
  "internship",
  "itertools",
  "num-bigint",
+ "ordered-float",
  "thiserror",
  "uuid",
  "ux",
@@ -131,6 +132,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a64b1ec5cda2586e284722486d802acf1f7dbdc623e2bfc57e65ca1cd099290"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "ordered-float"
+version = "2.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97c9d06878b3a851e8026ef94bf7fef9ba93062cd412601da4d9cf369b1cc62d"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

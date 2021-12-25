@@ -29,7 +29,7 @@ fn main() {
 
     println!(
         "{}",
-        edn::serialize(
+        edn::emit(
             &edn::parse("[{:person/name \"A\nnna\" :person/email \"anna@example.com\"}]").unwrap()
         )
     )
