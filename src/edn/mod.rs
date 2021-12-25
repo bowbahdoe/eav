@@ -1,10 +1,14 @@
+use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use chrono::format;
 use chrono::FixedOffset;
 use internship;
 use internship::IStr;
 use itertools::Itertools;
+use num_bigint::{BigInt, ParseBigIntError};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fmt;
 use std::fmt::{Display, Formatter};
+use std::num::{ParseFloatError, ParseIntError};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -95,6 +99,8 @@ pub enum Value {
     Keyword(Keyword),
     Integer(i64),
     Float(f64),
+    BigInt(BigInt),
+    BigDec(BigDecimal),
     List(Vec<Value>),
     Vector(Vec<Value>),
     Map(Vec<(Value, Value)>),
@@ -138,7 +144,7 @@ enum ParserError {
     InvalidKeyword,
 
     #[error("Invalid Symbol")]
-    InvalidSymbol,
+    InvalidSymbol(Symbol),
 
     #[error("Map must have an even number of elements")]
     OddNumberOfMapElements,
@@ -157,6 +163,21 @@ enum ParserError {
 
     #[error("Cannot have more than one slash in a symbol")]
     CannotHaveMoreThanOneSlashInSymbol,
+
+    #[error("Only 0 can start with 0")]
+    OnlyZeroCanStartWithZero,
+
+    #[error("Invalid float")]
+    BadFloat(ParseFloatError),
+
+    #[error("Invalid int")]
+    BadInt(ParseIntError),
+
+    #[error("Invalid big decimal")]
+    BadBigDec(ParseBigDecimalError),
+
+    #[error("Invalid big int")]
+    BadBigInt(ParseBigIntError),
 
     #[error("Unexpected Extra Input")]
     ExtraInput {
@@ -189,10 +210,7 @@ enum ParserState {
         characters_before_a_slash: Vec<char>,
         characters_after_a_slash: Vec<char>,
         saw_slash: bool,
-    }, // Decide after parsing symbol if it is true, false, or nil
-    ParsingNumeric {
-        characters_so_far: Vec<char>,
-    },
+    }, // Decide after parsing symbol if it is true, false, nil, or actually supposed to be a number
     ParsingString {
         built_up: String,
     },
@@ -205,7 +223,7 @@ fn is_whitespace(c: char) -> bool {
     c.is_whitespace() || c == ','
 }
 
-fn is_allowed_anywhere_symbol_character(c: char) -> bool {
+fn is_allowed_symbol_character(c: char) -> bool {
     c == '.'
         || c == '*'
         || c == '+'
@@ -220,10 +238,10 @@ fn is_allowed_anywhere_symbol_character(c: char) -> bool {
         || c == '<'
         || c == '>'
         || c.is_alphabetic()
-}
-
-fn is_allowed_symbol_after_first_character(c: char) -> bool {
-    is_allowed_anywhere_symbol_character(c) || c.is_numeric()
+        // Technically this is *not true*, but the plan is to parse all
+        // numbers as symbols and figure out later which should be numbers
+        // and if any are malformed there i will produce an error
+        || c.is_numeric()
 }
 
 fn equal(v1: &Value, v2: &Value) -> bool {
@@ -243,6 +261,8 @@ fn equal(v1: &Value, v2: &Value) -> bool {
         // map/set key/elements, or constituents therein, is not advised.
         (Value::Float(f1), Value::Float(f2)) => f1 == f2,
         (Value::Integer(i1), Value::Integer(i2)) => i1 == i2,
+        (Value::BigInt(bi1), Value::BigInt(bi2)) => bi1 == bi2,
+        (Value::BigDec(bd1), Value::BigDec(bd2)) => bd1 == bd2,
 
         // sequences (lists and vectors) are equal to other sequences whose count
         // of elements is the same, and for which each corresponding pair of
@@ -379,26 +399,16 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                     Err(ParserError::InvalidKeyword)
                 }
             } else if s[0] == '\\' {
-                parse_helper(
-                    &s[1..],
-                    ParserState::ParsingCharacter,
-                )
+                parse_helper(&s[1..], ParserState::ParsingCharacter)
             } else if s[0] == '#' {
                 parse_helper(&s[1..], ParserState::SelectingDispatch)
-            } else if is_allowed_anywhere_symbol_character(s[0]) || s[0] == '/' {
+            } else if is_allowed_symbol_character(s[0]) || s[0] == '/' {
                 parse_helper(
                     &s,
                     ParserState::ParsingSymbol {
                         characters_before_a_slash: vec![],
                         characters_after_a_slash: vec![],
                         saw_slash: false,
-                    },
-                )
-            } else if s[0].is_numeric() {
-                parse_helper(
-                    &s[1..],
-                    ParserState::ParsingNumeric {
-                        characters_so_far: vec![s[0]],
                     },
                 )
             } else {
@@ -559,7 +569,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                 }
             } else {
                 if characters_before_a_slash.is_empty() && !saw_slash {
-                    if is_allowed_anywhere_symbol_character(s[0]) {
+                    if is_allowed_symbol_character(s[0]) {
                         characters_before_a_slash.push(s[0]);
                         parse_helper(
                             &s[1..],
@@ -570,7 +580,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                             },
                         )
                     } else if s[0] == '/' {
-                        if s.len() > 1 && is_allowed_symbol_after_first_character(s[1]) {
+                        if s.len() > 1 && is_allowed_symbol_character(s[1]) {
                             Err(ParserError::CannotHaveSlashAtBeginningOfSymbol)
                         } else {
                             Ok(ParserSuccess {
@@ -582,7 +592,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                         Err(ParserError::UnexpectedCharacter(s[0]))
                     }
                 } else if !saw_slash {
-                    if is_allowed_symbol_after_first_character(s[0]) {
+                    if is_allowed_symbol_character(s[0]) {
                         characters_before_a_slash.push(s[0]);
                         parse_helper(
                             &s[1..],
@@ -593,9 +603,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                             },
                         )
                     } else if s[0] == '/' {
-                        if s.len() == 1
-                            || (s.len() > 1 && !is_allowed_symbol_after_first_character(s[1]))
-                        {
+                        if s.len() == 1 || (s.len() > 1 && !is_allowed_symbol_character(s[1])) {
                             Err(ParserError::CannotHaveSlashAtEndOfSymbol)
                         } else {
                             parse_helper(
@@ -615,10 +623,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                         })
                     }
                 } else {
-                    if (characters_after_a_slash.is_empty()
-                        && is_allowed_anywhere_symbol_character(s[0]))
-                        || is_allowed_symbol_after_first_character(s[0])
-                    {
+                    if is_allowed_symbol_character(s[0]) {
                         characters_after_a_slash.push(s[0]);
                         parse_helper(
                             &s[1..],
@@ -763,7 +768,7 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
         ParserState::ParsingCharacter => {
             let ParserSuccess {
                 remaining_input,
-                value
+                value,
             } = parse_helper(s, ParserState::Begin)?;
 
             if let Value::Symbol(symbol) = value {
@@ -771,42 +776,40 @@ fn parse_helper(s: &[char], mut parser_state: ParserState) -> Result<ParserSucce
                     if symbol.name.len() == 1 {
                         Ok(ParserSuccess {
                             remaining_input,
-                            value: Value::Character(symbol.name.chars().next().expect(
-                                "Asserted that this string has at least one character."
-                            ))
+                            value: Value::Character(
+                                symbol.name.chars().next().expect(
+                                    "Asserted that this string has at least one character.",
+                                ),
+                            ),
                         })
-                    }
-                    else {
+                    } else {
                         match &symbol.name.as_str() {
                             &"newline" => Ok(ParserSuccess {
                                 remaining_input,
-                                value: Value::Character('\n')
+                                value: Value::Character('\n'),
                             }),
                             &"return" => Ok(ParserSuccess {
                                 remaining_input,
-                                value: Value::Character('\r')
+                                value: Value::Character('\r'),
                             }),
                             &"space" => Ok(ParserSuccess {
                                 remaining_input,
-                                value: Value::Character(' ')
+                                value: Value::Character(' '),
                             }),
                             &"tab" => Ok(ParserSuccess {
                                 remaining_input,
-                                value: Value::Character('\t')
+                                value: Value::Character('\t'),
                             }),
-                            _ => Err(ParserError::InvalidCharacterSpecification)
+                            _ => Err(ParserError::InvalidCharacterSpecification),
                         }
                     }
-                }
-                else {
+                } else {
                     Err(ParserError::InvalidCharacterSpecification)
                 }
             } else {
                 Err(ParserError::InvalidCharacterSpecification)
             }
         }
-
-        _ => Err(ParserError::InvalidCharacterSpecification)
     }
 }
 
@@ -850,6 +853,98 @@ fn replace_nil_false_true(value: &mut Value) {
     }
 }
 
+/// previous parsing step interprets all numbers as symbols. This step
+/// goes through all the symbols and re-interprets them as numbers
+/// as appropriate
+fn replace_numeric_types(value: &mut Value) -> Result<(), ParserError> {
+    let starts_bad = |name: &str| {
+        name.starts_with(|c: char| c.is_numeric())
+            || (name.len() > 1 && name[1..].starts_with(|c: char| c.is_numeric()))
+    };
+    match value {
+        Value::Symbol(symbol) => {
+            match &symbol.namespace {
+                Some(ns) => {
+                    if starts_bad(ns) || starts_bad(&symbol.name) {
+                        return Err(ParserError::InvalidSymbol(symbol.clone()));
+                    }
+                }
+                None => {
+                    // See if it starts wrong
+                    // Symbols begin with a non-numeric character
+                    // If -, + or . are the first character, the second character (if any) must be non-numeric.
+                    let name: &str = &symbol.name;
+                    if starts_bad(name) {
+                        if name.ends_with("M") && name.chars().filter(|c| *c == 'M').count() == 1 {
+                            *value = Value::BigDec(
+                                str::parse::<BigDecimal>(&symbol.name[..symbol.name.len() - 1])
+                                    .map_err(|err| ParserError::BadBigDec(err))?,
+                            );
+                        } else if name.contains(".") || name.contains("e") || name.contains("E") {
+                            *value = Value::Float(
+                                str::parse::<f64>(&symbol.name)
+                                    .map_err(|err| ParserError::BadFloat(err))?,
+                            );
+                        } else if name != "0" && (name.starts_with("0"))
+                            || (name != "+0"
+                                && (name.len() > 1
+                                    && name.starts_with("+")
+                                    && name[1..].starts_with("0")))
+                            || (name != "-0"
+                                && (name.len() > 1
+                                    && name.starts_with("-")
+                                    && name[1..].starts_with("0")))
+                        {
+                            // Only ints are subject to this restriction it seems
+                            return Err(ParserError::OnlyZeroCanStartWithZero);
+                        } else if name.ends_with("N")
+                            && name.chars().filter(|c| *c == 'N').count() == 1
+                        {
+                            *value = Value::BigInt(
+                                str::parse::<BigInt>(&symbol.name[..symbol.name.len() - 1])
+                                    .map_err(|err| ParserError::BadBigInt(err))?,
+                            );
+                        } else {
+                            *value = Value::Integer(
+                                str::parse::<i64>(&symbol.name)
+                                    .map_err(|err| ParserError::BadInt(err))?,
+                            );
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+        Value::List(elements) => {
+            for element in elements {
+                replace_numeric_types(element)?;
+            }
+            Ok(())
+        }
+        Value::Vector(elements) => {
+            for element in elements {
+                replace_numeric_types(element)?;
+            }
+            Ok(())
+        }
+        Value::Map(entries) => {
+            for (k, v) in entries {
+                replace_numeric_types(k)?;
+                replace_numeric_types(v)?;
+            }
+            Ok(())
+        }
+        Value::Set(elements) => {
+            for element in elements {
+                replace_numeric_types(element)?;
+            }
+            Ok(())
+        }
+        Value::TaggedElement(_, val) => replace_numeric_types(val),
+        _ => Ok(()),
+    }
+}
+
 // Parse EDN from the given input string
 fn parse(s: &str) -> Result<Value, ParserError> {
     let chars: Vec<char> = s.chars().collect();
@@ -868,6 +963,7 @@ fn parse(s: &str) -> Result<Value, ParserError> {
     }
     // previous step interprets nil, false, and true as symbols
     replace_nil_false_true(&mut value);
+    replace_numeric_types(&mut value)?;
     Ok(value)
 }
 
@@ -1277,9 +1373,77 @@ mod tests {
                 (Value::Character('b'), Value::Character('\r')),
                 (Value::Character('r'), Value::Character('c')),
                 (Value::Character('\t'), Value::Character('d')),
-
             ]),
             parse("{\\space \\z\\a \\newline \\b \\return \\r \\c \\tab \\d}").unwrap()
         )
+    }
+
+    #[test]
+    fn test_parse_int() {
+        assert_eq!(Value::Integer(123), parse("123").unwrap())
+    }
+
+    #[test]
+    fn test_parse_float() {
+        assert_eq!(Value::Float(12.1), parse("12.1").unwrap())
+    }
+
+    #[test]
+    fn test_parse_neg_int() {
+        assert_eq!(Value::Integer(-123), parse("-123").unwrap())
+    }
+
+    #[test]
+    fn test_parse_neg_float() {
+        assert_eq!(Value::Float(-12.1), parse("-12.1").unwrap())
+    }
+
+    #[test]
+    fn test_parse_pos_int() {
+        assert_eq!(Value::Integer(123), parse("+123").unwrap())
+    }
+
+    #[test]
+    fn test_parse_pos_float() {
+        assert_eq!(Value::Float(12.1), parse("+12.1").unwrap())
+    }
+
+    #[test]
+    fn test_parse_zero() {
+        assert_eq!(Value::Integer(0), parse("+0").unwrap(),);
+        assert_eq!(Value::Integer(0), parse("0").unwrap(),);
+        assert_eq!(Value::Integer(0), parse("-0").unwrap(),);
+    }
+
+    #[test]
+    fn test_parse_zero_float() {
+        assert_eq!(Value::Float(0f64), parse("+0.").unwrap());
+        assert_eq!(Value::Float(0f64), parse("0.").unwrap());
+        assert_eq!(Value::Float(0f64), parse("-0.").unwrap());
+    }
+
+    #[test]
+    fn test_parse_e() {
+        assert_eq!(Value::Float(1000.0), parse("10e+2").unwrap());
+        assert_eq!(Value::Float(1200.0), parse("12e+2").unwrap());
+        assert_eq!(Value::Float(1200.0), parse("12e2").unwrap());
+        assert_eq!(Value::Float(1200.0), parse("12E2").unwrap());
+        assert_eq!(Value::Float(5200.0), parse("52E+2").unwrap());
+        assert_eq!(Value::Float(1.2), parse("120e-2").unwrap());
+        assert_eq!(Value::Float(1.2), parse("120E-2").unwrap());
+        assert_eq!(
+            Value::Float(1422141241242142142141241.124),
+            parse("1422141241242142142141241.124E0").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_parse_bigint() {
+        assert_eq!(Value::BigInt(BigInt::from(123)), parse("123N").unwrap());
+    }
+
+    #[test]
+    fn test_parse_bigdec() {
+        assert_eq!(Value::BigDec(BigDecimal::from(123)), parse("123M").unwrap());
     }
 }
