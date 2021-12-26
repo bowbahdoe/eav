@@ -1171,11 +1171,23 @@ fn replace_numeric_types(value: &mut Value) -> Result<(), ParserError> {
     }
 }
 
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct ParserOptions {
-    track_line_numbers: bool,
-    allow_extra_input: bool,
-    allow_namespaced_map_syntax: bool,
+    pub track_line_numbers: bool,
+    pub allow_extra_input: bool,
+    pub allow_namespaced_map_syntax: bool,
+    _hidden: ()
+}
+
+impl Default for ParserOptions {
+    fn default() -> Self {
+        ParserOptions {
+            track_line_numbers: false,
+            allow_extra_input: false,
+            allow_namespaced_map_syntax: true,
+            _hidden: ()
+        }
+    }
 }
 
 // Parse EDN from the given input string
