@@ -47,6 +47,7 @@ fn main() {
 
 :deps      {org.clojure/clojure                             {:mvn/version \"1.10.1\"}
 org.clojure/clojurescript                       {:mvn/version \"1.10.844\"}}}"
-        ).unwrap()
+        )
+        .unwrap()
     )
 }
