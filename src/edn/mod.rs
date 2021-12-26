@@ -1,4 +1,4 @@
-use crate::edn::Context::{ParsingList, ParsingMap, ParsingSet, ParsingString, ParsingVector};
+
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use chrono::FixedOffset;
 use internship;
@@ -341,9 +341,9 @@ fn equal(v1: &Value, v2: &Value) -> bool {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-struct RowCol {
-    row: usize,
-    col: usize,
+pub struct RowCol {
+    pub row: usize,
+    pub col: usize,
 }
 
 /// The purpose of this interface is to keep track of a "context stack"
@@ -389,7 +389,7 @@ impl ParseObserver for NoOpParseObserver {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum Context {
+pub enum Context {
     ParsingVector(RowCol),
     ParsingList(RowCol),
     ParsingMap(RowCol),
@@ -414,23 +414,23 @@ impl ContextStackerObserver {
 
 impl ParseObserver for ContextStackerObserver {
     fn start_parsing_vector(&mut self) {
-        self.context.push(ParsingVector(self.row_col));
+        self.context.push(Context::ParsingVector(self.row_col));
     }
 
     fn start_parsing_list(&mut self) {
-        self.context.push(ParsingList(self.row_col));
+        self.context.push(Context::ParsingList(self.row_col));
     }
 
     fn start_parsing_map(&mut self) {
-        self.context.push(ParsingMap(self.row_col));
+        self.context.push(Context::ParsingMap(self.row_col));
     }
 
     fn start_parsing_set(&mut self) {
-        self.context.push(ParsingSet(self.row_col));
+        self.context.push(Context::ParsingSet(self.row_col));
     }
 
     fn start_parsing_string(&mut self) {
-        self.context.push(ParsingString(self.row_col));
+        self.context.push(Context::ParsingString(self.row_col));
     }
 
     fn stop_parsing_current(&mut self) {
