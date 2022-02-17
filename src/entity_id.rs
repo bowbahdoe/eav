@@ -28,6 +28,10 @@ impl EntityId {
         self.0
     }
 
+    pub fn to_i64(&self) -> i64 {
+        self.0 as i64
+    }
+
     pub fn from_u64(id: u64) -> EntityId {
         EntityId(id)
     }

@@ -1,19 +1,20 @@
 use crate::datom::{Datom, DatomKind};
 use crate::datom_value::DatomValue;
-use crate::edn::Keyword;
+use edn_format::Keyword;
 use crate::entity_id::EntityId;
 
 mod byte_string;
 mod datom;
 mod datom_value;
-mod edn;
 mod entity_id;
 mod functions;
 mod query;
 mod storage;
 mod transaction_id;
+mod edn_decode;
 
 use std::time;
+use edn_format as edn;
 
 fn main() {
     let datom = Datom {
@@ -25,18 +26,21 @@ fn main() {
     };
 
     println!("{}", Keyword::from_namespace_and_name("user", "age"));
-    println!("{:?}", datom);
+    println!("{}", <Datom as Into<edn::Value>>::into(datom));
 
     println!(
         "{}",
-        edn::emit(
-            &edn::parse("[{:person/name \"A\nnna\" :person/email \"anna@example.com\"}]").unwrap()
+        edn::emit_str(
+            &edn::parse_str_with_options("[{:person/name \"A\nnna\" \
+            \n;;here is this\n\
+            :person/email \"anna@example.com\"}]",
+            edn::ParserOptions::default() ).unwrap()
         )
     );
 
     println!(
-        "{}",
-        edn::parse(
+        "{:?}",
+        edn::parse_str(
             "{:mvn/repos {\"jcenter\" {:url       \"https://jcenter.bintray.com\"
             :snapshots false
                 :releases  {:checksum :fail :update :always}}

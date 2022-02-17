@@ -54,6 +54,7 @@ dependencies = [
  "bigdecimal",
  "chrono",
  "crc32fast",
+ "edn-format",
  "internship",
  "itertools",
  "num-bigint",
@@ -61,6 +62,22 @@ dependencies = [
  "thiserror",
  "uuid",
  "ux",
+]
+
+[[package]]
+name = "edn-format"
+version = "3.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72c462f3c16bda8581446b1432b3182e8f2964dd5fcf900e7715cb0543898540"
+dependencies = [
+ "bigdecimal",
+ "chrono",
+ "internship",
+ "itertools",
+ "num-bigint",
+ "ordered-float",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]

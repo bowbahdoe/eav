@@ -1,4 +1,4 @@
-use crate::edn;
+use edn_format as edn;
 
 /// "small clojure interpreter" dialect of clojure
 pub struct SciFunction {
