@@ -1,0 +1,15 @@
+* Might make sense to use CapnProto as the format for storage of the Beta-epsilon tree
+* Not a direct translation from EDN, but bound to be fast
+* Can still spend the first phase of things dumping raw EDN
+
+* So components to do
+
+- Storage of index chunks
+- Indexing datoms
+- Modeling datoms for indexing
+- Querying datoms
+- Datalog for coming up with query plans
+- Transactor
+- Transaction Functions
+- Embedded Peer
+- HTTP Api

@@ -1,4 +1,4 @@
-use crate::datom::{Datom, DatomKind};
+use crate::datom::{Attribute, Datom, DatomKind};
 use crate::datom_value::DatomValue;
 use edn_format::Keyword;
 use crate::entity_id::EntityId;
@@ -7,22 +7,29 @@ mod byte_string;
 mod datom;
 mod datom_value;
 mod entity_id;
-mod functions;
 mod query;
 mod storage;
 mod transaction_id;
 mod edn_decode;
+mod binary;
 
 use std::time;
 use edn_format as edn;
+use serde::ser::Serialize;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Point {
+    x: i32,
+    y: i32,
+}
 
 fn main() {
     let datom = Datom {
         e: EntityId::from_u64(123),
-        a: Keyword::from_namespace_and_name("user", "age"),
+        a: Attribute::from(Keyword::from_namespace_and_name("user", "age")),
         v: DatomValue::Long(45),
         tx: transaction_id::TransactionId::from_u64(123),
-        kind: DatomKind::Addition,
+        kind: DatomKind::Assertion,
     };
 
     println!("{}", Keyword::from_namespace_and_name("user", "age"));
